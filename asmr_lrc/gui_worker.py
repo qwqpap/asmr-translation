@@ -15,6 +15,13 @@ from typing import Any
 from .cache import atomic_write_json, cache_directory, load_validated, source_identity
 from .config import AppConfig
 from .control import CancelledError, CancelToken
+from .downloader import (
+    DownloadConfig,
+    WorkPlan,
+    download_plan,
+    fetch_work_plan,
+    smart_audio_selection,
+)
 from .environment import probe_environment
 from .lrc import render_lrc, write_lrc_atomic
 from .models import FilteredTranscript, Translation
@@ -142,6 +149,30 @@ def _config(data: dict[str, Any]) -> AppConfig:
     )
 
 
+def _download_config(data: dict[str, Any]) -> DownloadConfig:
+    """Build download settings without ever placing secrets or URLs in logs."""
+    source = data.get("download", data.get("config", data))
+    if not isinstance(source, dict):
+        source = {}
+    endpoint = str(source.get("download_endpoint", source.get("endpoint", "https://api.asmr-200.com")))
+    curl_path_raw = source.get("curl_path")
+    proxy_raw = source.get("download_proxy", source.get("proxy"))
+    timeout_raw = source.get("download_connect_timeout", source.get("connect_timeout", 10))
+    retries_raw = source.get("download_retries", source.get("max_retries", 5))
+    try:
+        timeout = int(timeout_raw)
+        retries = int(retries_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("下载超时和重试次数必须是数字") from exc
+    return DownloadConfig(
+        endpoint=endpoint,
+        curl_path=None if curl_path_raw in (None, "") else str(curl_path_raw),
+        proxy=None if proxy_raw in (None, "") else str(proxy_raw),
+        connect_timeout=timeout,
+        max_retries=retries,
+    )
+
+
 def _command_probe(request: dict[str, Any]) -> None:
     config = _config(dict(request.get("config", {})))
     assert config.draft_provider is not None
@@ -198,6 +229,90 @@ def _command_run(request: dict[str, Any]) -> int:
         external_consent_callback=_external_consent,
     )
     return report.exit_code
+
+
+def _command_download_plan(request: dict[str, Any]) -> None:
+    config = _download_config(request)
+    raw_rj = request.get("rj", request.get("rj_id", ""))
+    if not isinstance(raw_rj, str) or not raw_rj.strip():
+        raise ValueError("download_plan 缺少 RJ 编号")
+    _TOKEN.raise_if_cancelled()
+    plan = fetch_work_plan(raw_rj, config)
+    _TOKEN.raise_if_cancelled()
+    # The GUI receives stable IDs and metadata only.  Media URLs remain inside the
+    # download worker and are never printed to logs or persisted in the manifest.
+    public = plan.public_dict()
+    public["smart_selected_ids"] = sorted(smart_audio_selection(plan.files))
+    _write("download_metadata", plan=public, **public)
+
+
+def _plan_for_download(request: dict[str, Any], config: DownloadConfig) -> WorkPlan:
+    raw_plan = request.get("plan")
+    if not isinstance(raw_plan, dict):
+        raw_rj = request.get("rj", request.get("rj_id", ""))
+        if not isinstance(raw_rj, str) or not raw_rj.strip():
+            raise ValueError("download_run 缺少 plan 或 RJ 编号")
+        return fetch_work_plan(raw_rj, config)
+    # A public plan is intentionally sufficient: resolve fresh media URLs inside
+    # the worker.  Full plans are accepted for callers that already own a plan.
+    files = raw_plan.get("files")
+    has_media_urls = isinstance(files, list) and any(
+        isinstance(item, dict) and item.get("mediaDownloadUrl") for item in files
+    )
+    if has_media_urls:
+        return WorkPlan.from_dict(raw_plan)
+    raw_rj = raw_plan.get("rj_id", raw_plan.get("rj"))
+    if not isinstance(raw_rj, str) or not raw_rj.strip():
+        raise ValueError("download_run plan 缺少 RJ 编号")
+    return fetch_work_plan(raw_rj, config)
+
+
+def _command_download_run(request: dict[str, Any]) -> None:
+    config = _download_config(request)
+    plan = _plan_for_download(request, config)
+    selected_raw = request.get("selected_ids", request.get("files", []))
+    if not isinstance(selected_raw, list | tuple | set):
+        raise ValueError("selected_ids 必须是数组")
+    selected_ids = {str(value) for value in selected_raw}
+    known_ids = {item.file_id for item in plan.files}
+    unknown = selected_ids - known_ids
+    if unknown:
+        raise ValueError("下载列表包含未知文件 ID")
+    if not selected_ids:
+        raise ValueError("至少选择一个下载文件")
+    config_root = request.get("config", {})
+    if not isinstance(config_root, dict):
+        config_root = {}
+    root_raw = request.get(
+        "output_root",
+        request.get("download_root", config_root.get("download_root")),
+    )
+    if not isinstance(root_raw, str) or not root_raw.strip():
+        raise ValueError("download_run 缺少输出目录")
+    root = Path(root_raw).expanduser().resolve()
+
+    def callback(event: dict[str, object]) -> None:
+        event_name = str(event.pop("event"))
+        mapped = {
+            "file": "download_file",
+            "progress": "download_progress",
+            "retry": "download_retry",
+            "complete": "download_complete",
+        }.get(event_name)
+        if mapped is not None:
+            # curl diagnostics can echo a signed media URL; keep those details
+            # out of the JSONL protocol and GUI logs.
+            event.pop("detail", None)
+            _write(mapped, **event)
+
+    download_plan(
+        plan,
+        selected_ids,
+        root,
+        config,
+        token=_TOKEN,
+        callback=callback,
+    )
 
 
 def _cache_artifacts(audio: Path, cache_root: Path) -> tuple[FilteredTranscript, Translation]:
@@ -387,6 +502,10 @@ def dispatch(request: dict[str, Any]) -> int:
         _command_probe(request)
     elif command == "run":
         return _command_run(request)
+    elif command == "download_plan":
+        _command_download_plan(request)
+    elif command == "download_run":
+        _command_download_run(request)
     elif command == "load_cues":
         _command_load_cues(request)
     elif command == "save_edits":
@@ -417,7 +536,7 @@ def main() -> int:
         # Only long-running translation needs cancellation/consent messages. Keeping a
         # reader blocked on an open anonymous stdin pipe prevents this Windows worker
         # from exiting after one-shot commands such as probe/load/save.
-        if request.get("command") == "run":
+        if request.get("command") in {"run", "download_plan", "download_run"}:
             threading.Thread(target=_control_listener, daemon=True).start()
         return dispatch(request)
     except CancelledError as exc:

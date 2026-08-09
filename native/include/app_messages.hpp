@@ -11,4 +11,5 @@ constexpr UINT WM_APP_LYRIC_EDIT = WM_APP + 5;
 enum class WorkerChannel : WPARAM {
     Task = 1,
     Utility = 2,
+    Download = 3,
 };

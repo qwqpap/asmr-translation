@@ -19,6 +19,12 @@ struct AppSettings {
     std::wstring ffmpeg_path;
     std::wstring cache_root;
     std::wstring glossary_path;
+    std::wstring download_root;
+    std::wstring download_endpoint = L"https://api.asmr-200.com";
+    std::wstring curl_path;
+    std::wstring download_proxy;
+    int download_connect_timeout = 10;
+    bool download_notice_shown = false;
     ProviderSettings draft;
     ProviderSettings review;
     bool review_same_as_draft = true;

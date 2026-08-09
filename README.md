@@ -1,9 +1,11 @@
-# ASMR Translation v0.2
+# ASMR Translation v0.3
 
 Windows 本地日语 ASMR 转写、上下文翻译与同步台词播放器。
 
+源码仓库：[github.com/qwqpap/asmr-translation](https://github.com/qwqpap/asmr-translation)。
+
 - Python 核心使用 `faster-whisper` 转写，默认通过本机 Ollama 翻译。
-- C++20 原生 Win32 GUI 提供任务、播放器和设置三页，不依赖 Qt/WPF。
+- C++20 原生 Win32 GUI 提供任务、播放器、下载和设置四页，不依赖 Qt/WPF。
 - 质量模式执行语境预分析、12 行批量初译和全量终审；平衡模式保留单遍流程。
 - 可分别为初译和终审选择 Ollama 或 OpenAI-compatible `/v1/chat/completions`。
 - 音频默认不上传；外部 API 只发送用户明确授权的转写文本。
@@ -16,11 +18,22 @@ Windows 本地日语 ASMR 转写、上下文翻译与同步台词播放器。
 - draft/review 分阶段缓存与 `review_changed`、`asr_suspect`、`term_conflict`、
   `term_repaired`、`low_confidence` 标志。
 - UTF-8 JSONL GUI worker：`probe`、`run`、`load_cues`、`save_edits`、
-  `prepare_playback`。
+  `prepare_playback`、`download_plan`、`download_run`。
 - Media Foundation 播放、跳转、音量、0.75–2.0 倍速、播放列表和 50 ms 台词刷新。
 - 中文主行、日文副行、点击跳转、双击编辑；首次编辑备份 `.lrc.bak`，之后原子保存。
 - 系统不支持的格式可由 FFmpeg 生成 PCM WAV 代理，默认 4 GiB LRU 缓存。
-- 协作取消后由 Win32 Job Object 兜底清理 Python/ASR 子进程树。
+- 协作取消后由 Win32 Job Object 兜底清理 Python/ASR/curl 子进程树。
+
+## RJ 一站式下载
+
+下载页接受 `RJ01528633`、数字 RJ 编号或 DLsite 作品链接。默认资料库为
+`%USERPROFILE%\\Downloads\\ASMR Translation`，默认只选择时长和文件名可靠匹配的较小音频版本；
+可以改为全部音频、全部文件或手动勾选。文件使用 `.part` 和 HTTP Range 续传，完成后校验大小并原子改名，
+每个作品保存 `download.manifest.json`。endpoint、curl、代理和连接超时均可在设置页修改，不会静默切换镜像。
+
+下载功能改编自 [thiliapr/asmr-one-downloader](https://github.com/thiliapr/asmr-one-downloader)，
+保留其作者署名、AGPL-3.0-or-later 许可和源码链接，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+请只下载你有权访问的内容；本项目不处理账号、Cookie、付费登录或访问限制绕过。
 
 ## 安全边界
 
@@ -141,3 +154,7 @@ ctest --test-dir native/build -C Release --output-on-failure
 
 不包含波形编辑、日文 ASR 原文修改、自包含安装包、自动模型下载或无提示的外部服务
 回退。EXE 是轻量前端，运行时仍需项目 Python 环境和相应本地工具。
+
+## 许可证
+
+本项目整体采用 GNU Affero General Public License v3.0 or later，完整文本见 [COPYING](COPYING)。

@@ -31,6 +31,16 @@ std::filesystem::path ApplicationDataDirectory() {
     return directory;
 }
 
+std::wstring DefaultDownloadRoot() {
+    PWSTR raw = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, KF_FLAG_DEFAULT, nullptr, &raw))) {
+        const std::filesystem::path path = std::filesystem::path(raw) / L"ASMR Translation";
+        CoTaskMemFree(raw);
+        return path.wstring();
+    }
+    return (std::filesystem::current_path() / L"Downloads" / L"ASMR Translation").wstring();
+}
+
 std::wstring FindOnPath(const wchar_t* executable) {
     const auto required = SearchPathW(nullptr, executable, nullptr, 0, nullptr, nullptr);
     if (required == 0) {
@@ -134,6 +144,9 @@ AppSettings LoadSettings() {
     const auto project_root = ProjectRootFromPython(defaults.python_path);
     defaults.asr_model = FindAsrModel(project_root);
     defaults.cache_root = (project_root / L".cache").wstring();
+    defaults.download_root = DefaultDownloadRoot();
+    defaults.download_endpoint = L"https://api.asmr-200.com";
+    defaults.download_connect_timeout = 10;
     const auto glossary = project_root / L"glossary.json";
     if (std::filesystem::is_regular_file(glossary)) {
         defaults.glossary_path = glossary.wstring();
@@ -160,6 +173,20 @@ AppSettings ParseSettingsUtf8(const std::string_view json, AppSettings defaults)
     defaults.ffmpeg_path = StringOr(root, L"ffmpeg_path", defaults.ffmpeg_path);
     defaults.cache_root = StringOr(root, L"cache_root", defaults.cache_root);
     defaults.glossary_path = StringOr(root, L"glossary_path", defaults.glossary_path);
+    defaults.download_root = StringOr(root, L"download_root", defaults.download_root);
+    defaults.download_endpoint =
+        StringOr(root, L"download_endpoint", defaults.download_endpoint);
+    defaults.curl_path = StringOr(root, L"curl_path", defaults.curl_path);
+    defaults.download_proxy = StringOr(root, L"download_proxy", defaults.download_proxy);
+    if (root.HasKey(L"download_connect_timeout")) {
+        defaults.download_connect_timeout = static_cast<int>(
+            root.GetNamedNumber(L"download_connect_timeout", defaults.download_connect_timeout));
+        if (defaults.download_connect_timeout <= 0) {
+            defaults.download_connect_timeout = 10;
+        }
+    }
+    defaults.download_notice_shown =
+        BoolOr(root, L"download_notice_shown", defaults.download_notice_shown);
     defaults.review_same_as_draft =
         BoolOr(root, L"review_same_as_draft", defaults.review_same_as_draft);
     defaults.quality_mode = BoolOr(root, L"quality_mode", defaults.quality_mode);
@@ -179,6 +206,16 @@ std::string SerializeSettingsUtf8(const AppSettings& settings) {
     root.SetNamedValue(L"ffmpeg_path", JsonValue::CreateStringValue(settings.ffmpeg_path));
     root.SetNamedValue(L"cache_root", JsonValue::CreateStringValue(settings.cache_root));
     root.SetNamedValue(L"glossary_path", JsonValue::CreateStringValue(settings.glossary_path));
+    root.SetNamedValue(L"download_root", JsonValue::CreateStringValue(settings.download_root));
+    root.SetNamedValue(L"download_endpoint",
+                       JsonValue::CreateStringValue(settings.download_endpoint));
+    root.SetNamedValue(L"curl_path", JsonValue::CreateStringValue(settings.curl_path));
+    root.SetNamedValue(L"download_proxy",
+                       JsonValue::CreateStringValue(settings.download_proxy));
+    root.SetNamedValue(L"download_connect_timeout",
+                       JsonValue::CreateNumberValue(settings.download_connect_timeout));
+    root.SetNamedValue(L"download_notice_shown",
+                       JsonValue::CreateBooleanValue(settings.download_notice_shown));
     root.SetNamedValue(L"review_same_as_draft",
                        JsonValue::CreateBooleanValue(settings.review_same_as_draft));
     root.SetNamedValue(L"quality_mode", JsonValue::CreateBooleanValue(settings.quality_mode));

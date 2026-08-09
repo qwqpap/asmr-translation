@@ -4,11 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "asmr-lrc"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local Japanese ASMR transcription and Simplified Chinese LRC generation"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
+license-files = ["COPYING"]
+classifiers = [
+  "License :: OSI Approved :: GNU Affero General Public License v3",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   "faster-whisper>=1.1.1,<2",
 ]
