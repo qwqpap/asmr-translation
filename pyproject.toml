@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "asmr-lrc"
+version = "0.2.0"
+description = "Local Japanese ASMR transcription and Simplified Chinese LRC generation"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+dependencies = [
+  "faster-whisper>=1.1.1,<2",
+]
+
+[project.optional-dependencies]
+cuda = [
+  "nvidia-cublas-cu12>=12.1,<13",
+  "nvidia-cudnn-cu12>=9,<10",
+]
+dev = [
+  "pytest>=8.3,<9",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+asmr-lrc = "asmr_lrc.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["asmr_lrc"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

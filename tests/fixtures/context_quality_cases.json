@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "scenes": [
+    {
+      "name": "park-introduction",
+      "segments": [
+        {"id": "s001", "text": "や、ここを座っていいかな"},
+        {"id": "s002", "text": "ありがとう"},
+        {"id": "s003", "text": "におい今朝はすごい雨だったね"},
+        {"id": "s004", "text": "学校はどう?"},
+        {"id": "s005", "text": "お姉さんこう見えても家庭教師の資格持ってるから"},
+        {"id": "s006", "text": "歴史とかは得意だよ"},
+        {"id": "s007", "text": "徳川将軍も第31代まで全部言えるし"},
+        {"id": "s008", "text": "この公園って全然人いないよね"},
+        {"id": "s009", "text": "遊んでる子供もいないし"},
+        {"id": "s010", "text": "もったいないから君が使っておいでよ"}
+      ],
+      "expectations": [
+        {"id": "s003", "category": "asr_rooted", "required_any": ["雨"], "forbidden": ["雨水味", "香味"]},
+        {"id": "s005", "category": "translation_fixable", "required_any": ["别看", "看起来"], "forbidden": ["明明有"]},
+        {"id": "s007", "category": "translation_fixable", "required_any": ["31"], "forbidden": ["家康"]},
+        {"id": "s009", "category": "translation_fixable", "required_any": ["孩子"], "forbidden": []},
+        {"id": "s010", "category": "translation_fixable", "required_any": ["玩", "用"], "forbidden": ["拿走"]}
+      ]
+    },
+    {
+      "name": "playground-slide-and-pinecones",
+      "segments": [
+        {"id": "s011", "text": "公園の滑り台って"},
+        {"id": "s012", "text": "年々少しずつ改良されてて"},
+        {"id": "s013", "text": "10年前とは比べ物にならないくらい滑り心地が良くなってるんだよ"},
+        {"id": "s014", "text": "危なくないように"},
+        {"id": "s015", "text": "速度は昔より下がってるんだけど"},
+        {"id": "s016", "text": "それでも楽しく滑れるように研究されてるんだって"},
+        {"id": "s017", "text": "この季節になると"},
+        {"id": "s018", "text": "松ぼっくりが落ちてるから猫も見かけないんだよ"},
+        {"id": "s019", "text": "猫は松やにの匂いが嫌いだから"},
+        {"id": "s020", "text": "松ぼっくりがあると警戒して出てこなくなるんだよ"}
+      ],
+      "expectations": [
+        {"id": "s013", "category": "translation_fixable", "required_any": ["滑", "顺"], "forbidden": ["滑雪"]},
+        {"id": "s014", "category": "translation_fixable", "required_any": ["安全", "危险"], "forbidden": []},
+        {"id": "s016", "category": "translation_fixable", "required_any": ["滑梯", "滑行", "滑下来", "滑下去"], "forbidden": ["滑雪"]},
+        {"id": "s018", "category": "translation_fixable", "required_any": ["松果"], "forbidden": ["松茸"], "critical": true},
+        {"id": "s019", "category": "translation_fixable", "required_any": ["松脂"], "forbidden": ["樟脑"]}
+      ]
+    },
+    {
+      "name": "remote-control-and-agar",
+      "segments": [
+        {"id": "s021", "text": "昨日の夜"},
+        {"id": "s022", "text": "家でテレビ見てたんだけど"},
+        {"id": "s023", "text": "音量を上げようとしたのに"},
+        {"id": "s024", "text": "チャンネルが勝手に変わったりして焦っちゃった"},
+        {"id": "s025", "text": "おやつの寒天が"},
+        {"id": "s026", "text": "テーブルの上にあったのが原因だったんだ"},
+        {"id": "s027", "text": "寒天は赤外線の波長を乱しちゃうんだって"},
+        {"id": "s028", "text": "そんなのわかるわけないじゃんね"},
+        {"id": "s029", "text": "寒天かリモコンか"},
+        {"id": "s030", "text": "どっちかに注意書きをしておいたほうがいいと思うな"}
+      ],
+      "expectations": [
+        {"id": "s025", "category": "translation_fixable", "required_any": ["寒天", "琼脂"], "forbidden": ["海藻胶"]},
+        {"id": "s027", "category": "translation_fixable", "required_any": ["红外"], "forbidden": ["紫外"]},
+        {"id": "s028", "category": "translation_fixable", "required_any": ["怎么可能知道", "不可能知道"], "forbidden": ["怎么可能不知道"]},
+        {"id": "s029", "category": "translation_fixable", "required_any": ["遥控"], "forbidden": ["明胶"]},
+        {"id": "s030", "category": "translation_fixable", "required_any": ["其中一个", "其中一边", "一方", "两者之一"], "forbidden": ["两边"]}
+      ]
+    },
+    {
+      "name": "shrine-and-seasonal-wordplay",
+      "segments": [
+        {"id": "s031", "text": "この間神社に参拝してきたんだ"},
+        {"id": "s032", "text": "お参りすると"},
+        {"id": "s033", "text": "二重丸をきれいに書けるようになる神社の一つなんだよ"},
+        {"id": "s034", "text": "全国のパワースポットは"},
+        {"id": "s035", "text": "消費者庁の管轄下にある神社だよ"},
+        {"id": "s036", "text": "来年の節分の絵法がどの方角か知ってる?"},
+        {"id": "s037", "text": "どっちを向いて食べればいいんだろうね"},
+        {"id": "s038", "text": "3月はひな祭りがあるでしょ"},
+        {"id": "s039", "text": "右と左が今と逆だったんだよ"},
+        {"id": "s040", "text": "ややこしいよね"}
+      ],
+      "expectations": [
+        {"id": "s032", "category": "translation_fixable", "required_any": ["参拜", "祈拜"], "forbidden": ["注意"]},
+        {"id": "s034", "category": "translation_fixable", "required_any": ["能量景点", "能量圣地", "灵验"], "forbidden": ["电力骚乱"]},
+        {"id": "s036", "category": "asr_rooted", "required_any": ["惠方", "方位"], "forbidden": ["绘法"]},
+        {"id": "s038", "category": "translation_fixable", "required_any": ["女儿节", "雏祭"], "forbidden": ["雏儿"]},
+        {"id": "s040", "category": "translation_fixable", "required_any": ["复杂", "绕", "麻烦"], "forbidden": []}
+      ]
+    },
+    {
+      "name": "travel-and-fishcake",
+      "segments": [
+        {"id": "s041", "text": "駅前のクリーニング屋さんにコートを出したんだけどさ"},
+        {"id": "s042", "text": "3サイズくらい大きいのが帰ってきてびっくりしちゃった"},
+        {"id": "s043", "text": "海外旅行行ってみたいよね"},
+        {"id": "s044", "text": "イタリアのピサの斜塔を見に行きたいんだ"},
+        {"id": "s045", "text": "ピサの斜塔を支えるワイヤーの数が4倍になったって言うし"},
+        {"id": "s046", "text": "アメリカ旅行に行ってきた友達がお土産を買ってきてくれたんだけど"},
+        {"id": "s047", "text": "虹色のかまぼこだったんだよね"},
+        {"id": "s048", "text": "かまぼこは最初アメリカで全然売れなかったらしいんだけど"},
+        {"id": "s049", "text": "外側の色をピンクから虹色にした途端"},
+        {"id": "s050", "text": "飛ぶように売れるようになって"}
+      ],
+      "expectations": [
+        {"id": "s041", "category": "asr_rooted", "required_any": ["干洗", "洗衣店"], "forbidden": ["筛查"]},
+        {"id": "s042", "category": "translation_fixable", "required_any": ["尺码", "号"], "forbidden": ["三圈"]},
+        {"id": "s044", "category": "asr_rooted", "required_any": ["比萨斜塔", "比萨的斜塔"], "forbidden": ["披萨店"]},
+        {"id": "s047", "category": "translation_fixable", "required_any": ["鱼板", "鱼糕", "蒲鉾"], "forbidden": ["寿司"]},
+        {"id": "s048", "category": "translation_fixable", "required_any": ["鱼板", "鱼糕", "蒲鉾"], "forbidden": ["玉子"]}
+      ]
+    },
+    {
+      "name": "soseki-and-part-time-job",
+      "segments": [
+        {"id": "s051", "text": "あ、夏目漱石といえば"},
+        {"id": "s052", "text": "学校の授業でぽっちゃんって読んだ?"},
+        {"id": "s053", "text": "教科書に載ってるのは最初の部分だけなんだけど"},
+        {"id": "s054", "text": "ぽっちゃんは最後"},
+        {"id": "s055", "text": "宇宙飛行士になるんだね"},
+        {"id": "s056", "text": "せっかく帰宅部なんだし"},
+        {"id": "s057", "text": "たまには晩御飯の手伝いとかしてあげなよ"},
+        {"id": "s058", "text": "夜はラーメン屋さんとして営業するから"},
+        {"id": "s059", "text": "その間だけ助っ人をやってるんだ"},
+        {"id": "s060", "text": "夜営業限定メニューの背脂カプチーノが意外と人気なんだよ"}
+      ],
+      "expectations": [
+        {"id": "s052", "category": "asr_rooted", "required_any": ["《少爷》", "少爷"], "forbidden": ["姑娘", "巨乳"], "critical": true},
+        {"id": "s054", "category": "asr_rooted", "required_any": ["少爷"], "forbidden": ["巨乳", "姑娘"], "critical": true},
+        {"id": "s056", "category": "translation_fixable", "required_any": ["回家部", "归宅部"], "forbidden": ["居家办公"]},
+        {"id": "s059", "category": "translation_fixable", "required_any": ["帮工", "帮忙", "帮手"], "forbidden": ["口交"], "critical": true},
+        {"id": "s060", "category": "translation_fixable", "required_any": ["背脂卡布奇诺", "猪油卡布奇诺"], "forbidden": ["拿铁"]}
+      ]
+    }
+  ]
+}

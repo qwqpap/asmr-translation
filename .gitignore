@@ -1,0 +1,15 @@
+.venv/
+.cache/
+.validation/
+models/
+tests/voice_test/*.mp3
+tests/voice_test/*.lrc
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+coverage.xml
+.coverage
