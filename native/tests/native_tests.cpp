@@ -1,11 +1,13 @@
 #include "app_messages.hpp"
 #include "lrc.hpp"
 #include "media_player.hpp"
+#include "page_host.hpp"
 #include "settings.hpp"
 #include "utf.hpp"
 #include "worker_protocol.hpp"
 
 #include <windows.h>
+#include <commctrl.h>
 #include <winrt/base.h>
 
 #include <chrono>
@@ -20,6 +22,8 @@ namespace {
 
 int failures = 0;
 asmr::MediaPlayer* media_player = nullptr;
+UINT forwarded_message = 0;
+WPARAM forwarded_wparam = 0;
 
 void Check(const bool condition, const char* message) {
     if (!condition) {
@@ -34,6 +38,12 @@ LRESULT CALLBACK MediaWindowProcedure(const HWND window,
                                       const LPARAM lparam) {
     if (message == WM_APP_MEDIA_EVENT && media_player != nullptr) {
         media_player->HandleEvent(static_cast<DWORD>(wparam));
+        return 0;
+    }
+    if (message == WM_COMMAND || message == WM_NOTIFY || message == WM_HSCROLL ||
+        message == WM_APP_LYRIC_CLICK) {
+        forwarded_message = message;
+        forwarded_wparam = wparam;
         return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
@@ -192,6 +202,26 @@ int wmain() {
                                                nullptr);
     Check(media_window != nullptr, "create media test window");
     if (media_window != nullptr) {
+        const auto page = asmr::CreatePageHost(media_window, GetModuleHandleW(nullptr));
+        Check(page != nullptr, "create page host");
+        if (page != nullptr) {
+            forwarded_message = 0;
+            forwarded_wparam = 0;
+            SendMessageW(page, WM_COMMAND, MAKEWPARAM(4242, BN_CLICKED), 0);
+            Check(forwarded_message == WM_COMMAND && LOWORD(forwarded_wparam) == 4242,
+                  "page host forwards button commands to root window");
+
+            forwarded_message = 0;
+            SendMessageW(page, WM_HSCROLL, TB_THUMBPOSITION, 0);
+            Check(forwarded_message == WM_HSCROLL,
+                  "page host forwards trackbar notifications to root window");
+
+            forwarded_message = 0;
+            SendMessageW(page, WM_APP_LYRIC_CLICK, 7, 0);
+            Check(forwarded_message == WM_APP_LYRIC_CLICK && forwarded_wparam == 7,
+                  "page host forwards lyric actions to root window");
+            DestroyWindow(page);
+        }
         asmr::MediaPlayer player;
         media_player = &player;
         Check(player.Initialize(media_window), "initialize Media Foundation player");

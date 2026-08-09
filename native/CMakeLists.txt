@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(NATIVE_SOURCES
     src/lrc.cpp
     src/media_player.cpp
+    src/page_host.cpp
     src/settings.cpp
     src/utf.cpp
     src/worker_client.cpp
@@ -48,6 +49,7 @@ add_executable(native-tests
     tests/native_tests.cpp
     src/lrc.cpp
     src/media_player.cpp
+    src/page_host.cpp
     src/settings.cpp
     src/utf.cpp
     src/worker_protocol.cpp

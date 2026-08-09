@@ -2,6 +2,7 @@
 #include "lrc.hpp"
 #include "lyrics_view.hpp"
 #include "media_player.hpp"
+#include "page_host.hpp"
 #include "settings.hpp"
 #include "utf.hpp"
 #include "worker_client.hpp"
@@ -351,9 +352,9 @@ void Application::CreatePages() {
         item.pszText = const_cast<wchar_t*>(title);
         TabCtrl_InsertItem(tab_, TabCtrl_GetItemCount(tab_), &item);
     }
-    task_page_ = CreateControl(L"STATIC", L"", SS_NOTIFY, tab_, 0);
-    player_page_ = CreateControl(L"STATIC", L"", SS_NOTIFY, tab_, 0);
-    settings_page_ = CreateControl(L"STATIC", L"", SS_NOTIFY, tab_, 0);
+    task_page_ = asmr::CreatePageHost(tab_, instance_);
+    player_page_ = asmr::CreatePageHost(tab_, instance_);
+    settings_page_ = asmr::CreatePageHost(tab_, instance_);
     CreateTaskPage();
     CreatePlayerPage();
     CreateSettingsPage();
