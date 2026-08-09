@@ -156,6 +156,7 @@ int wmain() {
 
     asmr::AppSettings settings;
     settings.python_path = L"C:\\资料库\\.venv\\Scripts\\python.exe";
+    settings.asr_model = L"C:\\资料库\\models\\faster-whisper-large-v3";
     settings.ffmpeg_path = L"C:\\工具\\ffmpeg.exe";
     settings.cache_root = L"C:\\很长的中文路径\\缓存";
     settings.glossary_path = L"C:\\资料库\\固定术语.json";
@@ -166,6 +167,7 @@ int wmain() {
     const auto settings_json = asmr::SerializeSettingsUtf8(settings);
     const auto loaded = asmr::ParseSettingsUtf8(settings_json);
     Check(loaded.python_path == settings.python_path, "settings Unicode round trip");
+    Check(loaded.asr_model == settings.asr_model, "settings ASR model path");
     Check(loaded.glossary_path == settings.glossary_path, "settings glossary path");
     Check(loaded.draft.model == settings.draft.model, "settings provider model");
     Check(settings_json.find("api_key") == std::string::npos,

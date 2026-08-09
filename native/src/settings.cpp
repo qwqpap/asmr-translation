@@ -57,6 +57,17 @@ std::filesystem::path ProjectRootFromPython(const std::wstring& python_path) {
     return std::filesystem::current_path();
 }
 
+std::wstring FindAsrModel(const std::filesystem::path& project_root) {
+    for (const auto& relative : {std::filesystem::path(L"models/faster-whisper-large-v3"),
+                                 std::filesystem::path(L"models/large-v3")}) {
+        const auto candidate = project_root / relative;
+        if (std::filesystem::is_regular_file(candidate / L"model.bin")) {
+            return candidate.wstring();
+        }
+    }
+    return L"large-v3";
+}
+
 std::wstring StringOr(const JsonObject& object,
                       const wchar_t* name,
                       const std::wstring& fallback) {
@@ -121,6 +132,7 @@ AppSettings LoadSettings() {
     defaults.python_path = FindPythonInterpreter();
     defaults.ffmpeg_path = FindFfmpegExecutable();
     const auto project_root = ProjectRootFromPython(defaults.python_path);
+    defaults.asr_model = FindAsrModel(project_root);
     defaults.cache_root = (project_root / L".cache").wstring();
     const auto glossary = project_root / L"glossary.json";
     if (std::filesystem::is_regular_file(glossary)) {
@@ -144,6 +156,7 @@ AppSettings LoadSettings() {
 AppSettings ParseSettingsUtf8(const std::string_view json, AppSettings defaults) {
     const auto root = JsonObject::Parse(Utf8ToWide(json));
     defaults.python_path = StringOr(root, L"python_path", defaults.python_path);
+    defaults.asr_model = StringOr(root, L"asr_model", defaults.asr_model);
     defaults.ffmpeg_path = StringOr(root, L"ffmpeg_path", defaults.ffmpeg_path);
     defaults.cache_root = StringOr(root, L"cache_root", defaults.cache_root);
     defaults.glossary_path = StringOr(root, L"glossary_path", defaults.glossary_path);
@@ -162,6 +175,7 @@ AppSettings ParseSettingsUtf8(const std::string_view json, AppSettings defaults)
 std::string SerializeSettingsUtf8(const AppSettings& settings) {
     JsonObject root;
     root.SetNamedValue(L"python_path", JsonValue::CreateStringValue(settings.python_path));
+    root.SetNamedValue(L"asr_model", JsonValue::CreateStringValue(settings.asr_model));
     root.SetNamedValue(L"ffmpeg_path", JsonValue::CreateStringValue(settings.ffmpeg_path));
     root.SetNamedValue(L"cache_root", JsonValue::CreateStringValue(settings.cache_root));
     root.SetNamedValue(L"glossary_path", JsonValue::CreateStringValue(settings.glossary_path));

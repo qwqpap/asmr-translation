@@ -15,6 +15,7 @@ struct ProviderSettings {
 
 struct AppSettings {
     std::wstring python_path;
+    std::wstring asr_model;
     std::wstring ffmpeg_path;
     std::wstring cache_root;
     std::wstring glossary_path;

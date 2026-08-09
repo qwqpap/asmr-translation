@@ -62,6 +62,7 @@ enum ControlId : int {
     IdLyricEdit,
     IdLyricSave,
     IdPython = 300,
+    IdAsrModel,
     IdFfmpeg,
     IdCache,
     IdGlossary,
@@ -256,6 +257,7 @@ private:
     asmr::LyricsView lyrics_;
 
     HWND python_{};
+    HWND asr_model_{};
     HWND ffmpeg_{};
     HWND cache_{};
     HWND glossary_{};
@@ -434,6 +436,7 @@ void Application::CreateSettingsPage() {
                                 style == CBS_DROPDOWNLIST ? 0 : WS_EX_CLIENTEDGE);
     };
     add_row(L"Python 解释器", python_, IdPython, ES_AUTOHSCROLL);
+    add_row(L"ASR 模型目录", asr_model_, IdAsrModel, ES_AUTOHSCROLL);
     add_row(L"FFmpeg", ffmpeg_, IdFfmpeg, ES_AUTOHSCROLL);
     add_row(L"缓存目录", cache_, IdCache, ES_AUTOHSCROLL);
     add_row(L"固定术语 JSON", glossary_, IdGlossary, ES_AUTOHSCROLL);
@@ -530,6 +533,7 @@ void Application::Layout() {
     int y = scale(18);
     std::size_t label_index = 0;
     for (const auto control : {python_,
+                               asr_model_,
                                ffmpeg_,
                                cache_,
                                glossary_,
@@ -579,6 +583,7 @@ void Application::AppendLog(const std::wstring& line) {
 
 void Application::LoadSettingsIntoControls() {
     SetText(python_, settings_.python_path);
+    SetText(asr_model_, settings_.asr_model);
     SetText(ffmpeg_, settings_.ffmpeg_path);
     SetText(cache_, settings_.cache_root);
     SetText(glossary_, settings_.glossary_path);
@@ -597,6 +602,7 @@ void Application::LoadSettingsIntoControls() {
 
 void Application::ReadSettingsFromControls() {
     settings_.python_path = TextOf(python_);
+    settings_.asr_model = TextOf(asr_model_);
     settings_.ffmpeg_path = TextOf(ffmpeg_);
     settings_.cache_root = TextOf(cache_);
     settings_.glossary_path = TextOf(glossary_);
@@ -665,6 +671,7 @@ JsonObject Application::ProviderJson(const asmr::ProviderSettings& provider,
 
 JsonObject Application::ConfigJson() const {
     JsonObject config;
+    PutString(config, L"asr_model", settings_.asr_model);
     PutString(config, L"cache_root", settings_.cache_root);
     PutString(config, L"ffmpeg_path", settings_.ffmpeg_path);
     PutString(config, L"glossary_path", settings_.glossary_path);

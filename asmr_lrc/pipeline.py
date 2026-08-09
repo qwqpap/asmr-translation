@@ -328,6 +328,12 @@ def run_pipeline(
                 last_error: AsmrLrcError | None = None
                 for model in models:
                     try:
+                        _message(
+                            f"加载 ASR 模型：{model}",
+                            callback=event_callback,
+                            quiet=quiet,
+                            audio=str(item.audio),
+                        )
                         run_asr_process(
                             item.audio,
                             raw_path,

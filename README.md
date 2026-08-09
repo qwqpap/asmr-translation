@@ -45,6 +45,8 @@ py -3.12 -m venv .venv
 
 项目不会自动下载模型。准备好的 faster-whisper 目录应包含 `model.bin`；浏览器有时会把
 二进制权重误存为 `.mht`，确认文件头与目标后只需改名，不要转换内容。
+原生 GUI 会自动使用项目下的 `models/faster-whisper-large-v3`，也可在“设置 → ASR
+模型目录”中改为其他完整的 faster-whisper 模型目录。
 
 ## 构建与启动原生 GUI
 
