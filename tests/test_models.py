@@ -2,7 +2,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from asmr_lrc.models import Segment, SourceIdentity, Transcript, WordTiming
+from asmr_lrc.models import (
+    Segment,
+    SourceIdentity,
+    Transcript,
+    Translation,
+    TranslationItem,
+    WordTiming,
+)
 
 
 def make_transcript() -> Transcript:
@@ -45,3 +52,34 @@ def test_transcript_rejects_unknown_schema() -> None:
 def test_segment_rejects_invalid_time_range() -> None:
     with pytest.raises(ValueError, match="时间范围"):
         Segment("s1", 2.0, 1.0, "x")
+
+
+def test_translation_v2_round_trip_preserves_flags() -> None:
+    source = SourceIdentity("C:/音声.wav", 12, 34, "abc")
+    translation = Translation(
+        source=source,
+        model="review-model",
+        created_at=datetime.now(UTC).isoformat(),
+        batches=({"stage": "review"},),
+        items=(TranslationItem("s1", "你好", ("review_changed",)),),
+        profile_id="profile",
+        stage="final",
+        draft_model="draft-model",
+        review_model="review-model",
+    )
+    assert Translation.from_dict(translation.to_dict()) == translation
+
+
+def test_translation_rejects_legacy_schema_without_invalidating_transcript() -> None:
+    transcript = make_transcript()
+    assert Transcript.from_dict(transcript.to_dict()) == transcript
+    legacy = {
+        "schema_version": 1,
+        "source": transcript.source.to_dict(),
+        "model": "old",
+        "created_at": transcript.created_at,
+        "batches": [],
+        "items": [],
+    }
+    with pytest.raises(ValueError, match="translation schema_version"):
+        Translation.from_dict(legacy)

@@ -1,11 +1,40 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from asmr_lrc.cache import atomic_write_json, source_identity
 from asmr_lrc.config import AppConfig
+from asmr_lrc.control import CancelledError, CancelToken
 from asmr_lrc.errors import AsmrLrcError
 from asmr_lrc.models import Segment, Transcript, TranslationItem
-from asmr_lrc.pipeline import run_pipeline
+from asmr_lrc.pipeline import _provider_pair, run_pipeline
+from asmr_lrc.providers import ProviderConfig, ProviderResponse
+
+
+class FakeProvider:
+    config = ProviderConfig("ollama", "http://local", "model")
+
+    def check(self) -> None:
+        return
+
+    def generate(self, **_kwargs) -> ProviderResponse:
+        raise AssertionError("测试应替换 translate_contextual_batch")
+
+    def unload(self) -> None:
+        return
+
+
+def pipeline_config(cache: Path, *, batch_size: int = 12) -> AppConfig:
+    provider = ProviderConfig("ollama", "http://local", "model")
+    return AppConfig(
+        cache_root=cache,
+        quality_mode="balanced",
+        review_enabled=False,
+        translation_batch_size=batch_size,
+        draft_provider=provider,
+        review_provider=None,
+    )
 
 
 def test_dry_run_writes_nothing(tmp_path: Path) -> None:
@@ -45,16 +74,16 @@ def test_pipeline_continues_after_single_file_failure(tmp_path: Path, monkeypatc
         atomic_write_json(output, transcript.to_dict())
 
     monkeypatch.setattr("asmr_lrc.pipeline.run_asr_process", fake_asr)
+    monkeypatch.setattr("asmr_lrc.pipeline._provider_pair", lambda _config: (FakeProvider(), None))
     monkeypatch.setattr(
-        "asmr_lrc.pipeline.translate_segments",
-        lambda segments, **_kwargs: (
-            tuple(TranslationItem(item.id, "晚安。") for item in segments),
-            ({"validation": "ok"},),
+        "asmr_lrc.pipeline.translate_contextual_batch",
+        lambda segments, indices, **_kwargs: (
+            tuple(TranslationItem(segments[index].id, "晚安。") for index in indices),
+            {"validation": "ok"},
         ),
     )
-    monkeypatch.setattr("asmr_lrc.pipeline.unload_model", lambda *_args: None)
 
-    report = run_pipeline(tmp_path, AppConfig(cache_root=cache))
+    report = run_pipeline(tmp_path, pipeline_config(cache))
 
     assert report.succeeded == 1
     assert report.failed == 1
@@ -88,18 +117,19 @@ def test_pipeline_resumes_completed_translation_batches(tmp_path: Path, monkeypa
         )
         atomic_write_json(output, transcript.to_dict())
 
-    def interrupting_translate(segments, **_kwargs):
-        calls.append(tuple(segment.id for segment in segments))
+    def interrupting_translate(segments, indices, **_kwargs):
+        calls.append(tuple(segments[index].id for index in indices))
         if len(calls) == 2:
             raise AsmrLrcError("模拟中断")
-        return tuple(TranslationItem(segment.id, "译文") for segment in segments), (
-            {"validation": "ok"},
+        return tuple(TranslationItem(segments[index].id, "译文") for index in indices), (
+            {"validation": "ok"}
         )
 
     monkeypatch.setattr("asmr_lrc.pipeline.run_asr_process", fake_asr)
-    monkeypatch.setattr("asmr_lrc.pipeline.translate_segments", interrupting_translate)
-    monkeypatch.setattr("asmr_lrc.pipeline.unload_model", lambda *_args: None)
-    first = run_pipeline(tmp_path, AppConfig(cache_root=cache, translation_batch_size=2))
+    monkeypatch.setattr("asmr_lrc.pipeline._provider_pair", lambda _config: (FakeProvider(), None))
+    monkeypatch.setattr("asmr_lrc.pipeline.translate_contextual_batch", interrupting_translate)
+    config = pipeline_config(cache, batch_size=2)
+    first = run_pipeline(tmp_path, config)
 
     assert first.failed == 1
     assert calls == [("s1", "s2"), ("s3",)]
@@ -107,16 +137,45 @@ def test_pipeline_resumes_completed_translation_batches(tmp_path: Path, monkeypa
 
     resumed_calls: list[tuple[str, ...]] = []
 
-    def resumed_translate(segments, **_kwargs):
-        resumed_calls.append(tuple(segment.id for segment in segments))
-        return tuple(TranslationItem(segment.id, "译文") for segment in segments), (
-            {"validation": "ok"},
+    def resumed_translate(segments, indices, **_kwargs):
+        resumed_calls.append(tuple(segments[index].id for index in indices))
+        return tuple(TranslationItem(segments[index].id, "译文") for index in indices), (
+            {"validation": "ok"}
         )
 
-    monkeypatch.setattr("asmr_lrc.pipeline.translate_segments", resumed_translate)
-    second = run_pipeline(tmp_path, AppConfig(cache_root=cache, translation_batch_size=2))
+    monkeypatch.setattr("asmr_lrc.pipeline.translate_contextual_batch", resumed_translate)
+    second = run_pipeline(tmp_path, config)
 
     assert second.succeeded == 1
     assert resumed_calls == [("s3",)]
     assert audio.with_suffix(".lrc").exists()
     assert not list(cache.rglob("translation.zh-CN.partial.json"))
+
+
+def test_pipeline_honors_pre_cancelled_token_without_writes(tmp_path: Path) -> None:
+    (tmp_path / "cancel.wav").write_bytes(b"audio")
+    cache = tmp_path / "cache"
+    token = CancelToken()
+    token.cancel()
+
+    with pytest.raises(CancelledError):
+        run_pipeline(tmp_path, pipeline_config(cache), cancel_token=token)
+
+    assert not cache.exists()
+
+
+def test_provider_pair_keeps_independent_stage_credentials(tmp_path: Path) -> None:
+    draft = ProviderConfig(
+        "openai", "https://example.test/v1", "same-model", api_key="draft-key"
+    )
+    review = ProviderConfig(
+        "openai", "https://example.test/v1", "same-model", api_key="review-key"
+    )
+    draft_runtime, review_runtime = _provider_pair(
+        AppConfig(cache_root=tmp_path, draft_provider=draft, review_provider=review)
+    )
+
+    assert review_runtime is not None
+    assert review_runtime is not draft_runtime
+    assert draft_runtime.config.api_key == "draft-key"
+    assert review_runtime.config.api_key == "review-key"

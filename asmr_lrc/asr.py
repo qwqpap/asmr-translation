@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 import urllib.error
 from pathlib import Path
 
+from .control import CancelledError, CancelToken
 from .environment import ollama_running_models
 from .errors import AsrError
 
@@ -38,9 +40,11 @@ def run_asr_process(
     model: str,
     device: str,
     compute_type: str,
-    ollama_url: str,
+    ollama_url: str | None,
+    cancel_token: CancelToken | None = None,
 ) -> None:
-    assert_ollama_gpu_free(ollama_url)
+    if ollama_url is not None:
+        assert_ollama_gpu_free(ollama_url)
     output.parent.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
@@ -58,26 +62,37 @@ def run_asr_process(
         compute_type,
     ]
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
-            check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
         )
     except OSError as exc:
         raise AsrError(f"无法启动 ASR 子进程: {exc}") from exc
-    debug = (result.stdout + "\n" + result.stderr).strip()
+    while process.poll() is None:
+        if cancel_token is not None and cancel_token.cancelled:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+            raise CancelledError("ASR 已取消")
+        time.sleep(0.2)
+    stdout, stderr = process.communicate()
+    debug = (stdout + "\n" + stderr).strip()
     with log_path.open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(f"ASR command model={model} device={device} compute_type={compute_type}\n")
         if debug:
             stream.write(debug + "\n")
-    if result.returncode == 0 and output.exists():
+    if process.returncode == 0 and output.exists():
         return
-    if _looks_like_oom(result.stderr):
+    if _looks_like_oom(stderr):
         raise AsrError(
             f"ASR 模型 {model} 显存不足。可显式指定 `--fallback-asr-model medium` "
             f"或直接使用 `--asr-model medium`。调试日志: {log_path}"
         )
-    raise AsrError(f"ASR 子进程失败（退出码 {result.returncode}）。调试日志: {log_path}")
+    raise AsrError(f"ASR 子进程失败（退出码 {process.returncode}）。调试日志: {log_path}")

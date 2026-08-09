@@ -89,3 +89,13 @@ def quarantine_corrupt(path: Path) -> Path:
             path.replace(target)
             return target
         index += 1
+
+
+def quarantine_stale(path: Path) -> Path:
+    index = 1
+    while True:
+        target = path.with_name(f"{path.name}.stale-{index}")
+        if not target.exists():
+            path.replace(target)
+            return target
+        index += 1

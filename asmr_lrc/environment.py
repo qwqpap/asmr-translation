@@ -159,10 +159,16 @@ def _ollama_check(base_url: str, model: str) -> list[Check]:
     ]
 
 
-def probe_environment(ollama_url: str, ollama_model: str) -> dict[str, Any]:
+def probe_environment(
+    ollama_url: str | None,
+    ollama_model: str | None,
+    *,
+    ffmpeg_path: str = "ffmpeg",
+    ollama_path: str = "ollama",
+) -> dict[str, Any]:
     checks = [
         _python_check(),
-        _run_version(["ffmpeg", "-version"]),
+        _run_version([ffmpeg_path, "-version"]),
         _run_version(
             [
                 "nvidia-smi",
@@ -170,12 +176,17 @@ def probe_environment(ollama_url: str, ollama_model: str) -> dict[str, Any]:
                 "--format=csv,noheader",
             ]
         ),
-        _run_version(["ollama", "--version"]),
         _package_check("faster-whisper"),
         _package_check("ctranslate2"),
         _ctranslate_cuda_check(),
-        *_ollama_check(ollama_url, ollama_model),
     ]
+    if ollama_url is not None and ollama_model is not None:
+        checks.extend(
+            [
+                _run_version([ollama_path, "--version"]),
+                *_ollama_check(ollama_url, ollama_model),
+            ]
+        )
     return {
         "platform": platform.platform(),
         "checks": [asdict(check) for check in checks],

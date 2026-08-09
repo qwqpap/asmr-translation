@@ -1,157 +1,141 @@
-# ASMR LRC
+# ASMR Translation v0.2
 
-一个完全在 Windows 本机运行的命令行工具：使用 `faster-whisper` 将日语 ASMR
-音频转写为带时间戳的字幕，再通过本机 Ollama 翻译成简体中文，最终在音频旁安全地
-生成同名 `.lrc`。音频、转写和译文不会上传到在线服务。
+Windows 本地日语 ASMR 转写、上下文翻译与同步台词播放器。
+
+- Python 核心使用 `faster-whisper` 转写，默认通过本机 Ollama 翻译。
+- C++20 原生 Win32 GUI 提供任务、播放器和设置三页，不依赖 Qt/WPF。
+- 质量模式执行语境预分析、12 行批量初译和全量终审；平衡模式保留单遍流程。
+- 可分别为初译和终审选择 Ollama 或 OpenAI-compatible `/v1/chat/completions`。
+- 音频默认不上传；外部 API 只发送用户明确授权的转写文本。
+
+## 主要能力
+
+- 前后各 8 行只读上下文、人物/风格/话题记忆和带证据 ID 的术语表。
+- 精确 ID 动态 JSON Schema，校验缺失、额外、重复、合并、空译文和日文残留。
+- 有反馈的有限重试、失败批次二分恢复和单 ID 术语修复。
+- draft/review 分阶段缓存与 `review_changed`、`asr_suspect`、`term_conflict`、
+  `term_repaired`、`low_confidence` 标志。
+- UTF-8 JSONL GUI worker：`probe`、`run`、`load_cues`、`save_edits`、
+  `prepare_playback`。
+- Media Foundation 播放、跳转、音量、0.75–2.0 倍速、播放列表和 50 ms 台词刷新。
+- 中文主行、日文副行、点击跳转、双击编辑；首次编辑备份 `.lrc.bak`，之后原子保存。
+- 系统不支持的格式可由 FFmpeg 生成 PCM WAV 代理，默认 4 GiB LRU 缓存。
+- 协作取消后由 Win32 Job Object 兜底清理 Python/ASR 子进程树。
 
 ## 安全边界
 
-- 默认不覆盖已有 LRC；只有 `--overwrite` 会覆盖。
-- 永不修改、重编码或删除原音频。
-- 每次只运行一个 ASR 子进程。
-- 批次中的所有 ASR 都完成并退出后，才开始调用 Ollama；两种模型不会由本工具同时加载。
-- ASR 前若发现 `ollama ps` 中有模型，本工具会停止并给出卸载提示。
-- 缓存清理必须由用户手动执行，本工具不自动删除中间数据。
+- 不修改、重编码或删除原音频。
+- 默认不覆盖已有 LRC；CLI 只有 `--overwrite` 才覆盖。
+- Whisper 转写缓存与翻译 v2 缓存分离，升级提示词不会重跑昂贵 ASR。
+- GUI 的 API Key 存入 Windows Credential Manager，不进入设置、缓存、日志或命令行。
+- CLI 的外部 Key 只从指定环境变量读取；非交互外发还需 `--allow-external-text`。
+- 不静默切换模型，不自动下载 Python、CUDA、FFmpeg、Ollama 或模型。
 
-## 安装
+## 环境与安装
 
-要求 Windows、Python 3.12、FFmpeg、NVIDIA 驱动/CUDA 运行能力和 Ollama。
-不要使用全局 Anaconda 环境作为最终运行环境。
+要求 Windows 10/11、Python 3.12、FFmpeg；本地翻译还需要 Ollama。CUDA 为当前
+`large-v3` 实机配置，CPU 仅适合诊断。
 
 ```powershell
-cd C:\path\to\translate
 py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,cuda]"
+.\.venv\Scripts\python.exe -m asmr_lrc --probe
 ```
 
-GPU 环境应安装 CUDA 运行时额外依赖：
+项目不会自动下载模型。准备好的 faster-whisper 目录应包含 `model.bin`；浏览器有时会把
+二进制权重误存为 `.mht`，确认文件头与目标后只需改名，不要转换内容。
+
+## 构建与启动原生 GUI
+
+使用 Visual Studio 2022 的 x64 C++ 工具链：
 
 ```powershell
-python -m pip install -e ".[dev,cuda]"
+cmake -S native -B native/build -G "Visual Studio 17 2022" -A x64
+cmake --build native/build --config Release
+.\native\build\Release\asmr-translation.exe
 ```
 
-如果本机 pip 配置的镜像长时间无响应，可临时指定可用镜像：
+也可把音频路径作为 EXE 参数，或拖放到窗口。GUI 会向上寻找项目 `.venv`，并从 PATH
+查找 FFmpeg；路径可在设置页修正。
+
+## CLI 用法
 
 ```powershell
-python -m pip install --index-url https://mirrors.aliyun.com/pypi/simple -e ".[dev,cuda]"
+# 计划与环境
+.\.venv\Scripts\python.exe -m asmr_lrc "D:\ASMR" --dry-run
+.\.venv\Scripts\python.exe -m asmr_lrc --probe
+
+# 默认质量模式
+.\.venv\Scripts\python.exe -m asmr_lrc "D:\ASMR" --quality-mode quality
+
+# 单遍平衡模式
+.\.venv\Scripts\python.exe -m asmr_lrc "D:\ASMR" --quality-mode balanced --no-review
+
+# 只复用已有转写重新翻译
+.\.venv\Scripts\python.exe -m asmr_lrc "D:\ASMR" --translate-only --overwrite
 ```
 
-如果 PowerShell 禁止激活脚本，可以直接使用
-`.\.venv\Scripts\python.exe`，无需修改系统执行策略。
-
-安装或准备本地翻译模型：
+外部 OpenAI-compatible 示例：
 
 ```powershell
-ollama pull qwen3.5-9b-abliterated:latest
-ollama list
+$env:ASMR_TRANSLATION_API_KEY = "<key>"
+.\.venv\Scripts\python.exe -m asmr_lrc "D:\ASMR" `
+  --draft-provider ollama `
+  --review-provider openai `
+  --review-base-url "https://example.com/v1" `
+  --review-model "review-model" `
+  --openai-api-key-env ASMR_TRANSLATION_API_KEY `
+  --allow-external-text
 ```
 
-如果手动下载 `Systran/faster-whisper-large-v3`，目录应包含 `model.bin`。某些浏览器会
-把这个二进制权重错误保存成 `.mht`；只要文件头是 `WhisperSpec`，可在确认目标不存在后
-将它改名为 `model.bin`，不要重新编码文件。使用项目内模型时：
+固定术语文件为 UTF-8 JSON：
 
-```powershell
-python -m asmr_lrc "D:\ASMR" --asr-model ".\models\faster-whisper-large-v3"
+```json
+{
+  "schema_version": 1,
+  "terms": [
+    {"source": "松ぼっくり", "target": "松果"},
+    {"source": "坊っちゃん", "target": "《少爷》"}
+  ]
+}
 ```
 
-模型名称不是硬编码的，可通过 `--ollama-model` 替换。修改版模型尚未完成真实 ASMR
-质量验收前，不应把“JSON 格式正确”等同于翻译质量合格。
+通过 `--glossary glossary.json` 使用。用户固定术语可跨同一资料库复用；模型自动提取的
+术语只保存在当前音频的语境缓存中。
 
-## 首次运行
+## 缓存
 
-先探测环境：
-
-```powershell
-python -m asmr_lrc --probe
-```
-
-确认将处理哪些文件（不创建缓存，不写 LRC）：
-
-```powershell
-python -m asmr_lrc "D:\ASMR 中文 日本語" --dry-run
-```
-
-开始完整批处理：
-
-```powershell
-python -m asmr_lrc "D:\ASMR 中文 日本語"
-```
-
-常用选项：
-
-```powershell
-python -m asmr_lrc "D:\ASMR" --transcribe-only
-python -m asmr_lrc "D:\ASMR" --translate-only
-python -m asmr_lrc "D:\ASMR" --overwrite
-python -m asmr_lrc "D:\ASMR" --asr-model medium
-python -m asmr_lrc "D:\ASMR" --fallback-asr-model medium
-python -m asmr_lrc "D:\ASMR" --ollama-model <model-name>
-```
-
-`--fallback-asr-model medium` 只会在首选模型失败后额外尝试一次，并将过程写入日志；
-默认不会静默降级或无限重试。完整参数见 `python -m asmr_lrc --help`。
-
-## 缓存与断点续跑
-
-默认缓存位于当前工作目录 `.cache`，可用 `--cache-dir` 更改。每个音频按绝对路径和
-内容指纹映射到独立目录：
+默认位于 `.cache/<path-hash>-<content-hash>/`：
 
 ```text
-.cache/<path-hash>-<content-hash>/
-  source.json
-  transcript.raw.json
-  transcript.filtered.json
-  translation.zh-CN.json
-  process.log
+source.json
+transcript.raw.json
+transcript.filtered.json
+translation.context.json
+translation.zh-CN.draft.json
+translation.zh-CN.review.partial.json
+translation.zh-CN.json
+process.log
 ```
 
-有效转写与译文会自动复用。源文件大小、修改时间或内容改变后，缓存不会被误用。
-结构损坏的缓存会重命名为 `*.corrupt-N`，随后安全重建；`--translate-only` 下缺少有效
-转写缓存会明确失败。
+翻译 v2 profile 包含提供方、模型、提示词版本、上下文策略、审校模式和术语哈希，不含
+API Key。损坏缓存会隔离为 `*.corrupt-N`，旧 Schema 会保留为 `*.stale-N`。
 
-手动清理项目缓存：
-
-```powershell
-Remove-Item -LiteralPath ".\.cache" -Recurse -Force
-```
-
-卸载项目环境：先确认当前目录，再删除项目内的 `.venv`。这些操作不可恢复，命令不会
-由程序自动执行。
-
-## 常见问题
-
-### CUDA 不可用
-
-运行 `python -m asmr_lrc --probe`。若 `ctranslate2-cuda` 失败，检查 NVIDIA 驱动、
-当前 Python 是否确实来自项目 `.venv`，以及安装的 CTranslate2 wheel 是否支持本机。
-本项目第一版以 CUDA 为验收目标，`--device cpu` 只用于诊断，不代表性能验收通过。
-
-### 显存不足
-
-先运行 `ollama ps`，对其中每个模型执行 `ollama stop <模型名>`。关闭其他占用显存的
-程序后重试。若 `large-v3` 仍 OOM，可显式使用 `--asr-model medium`，或指定
-`--fallback-asr-model medium`。不要仅凭成功启动就宣布 6GB 配置稳定；应记录峰值显存、
-耗时、实时倍率并抽听结果。
-
-### Ollama 未启动或模型不存在
-
-启动 Ollama 后运行 `ollama list`。用 `ollama pull <模型名>` 安装模型，或通过
-`--ollama-model` 选择已安装模型。默认地址可用 `--ollama-url` 覆盖。
-
-### 批次部分失败
-
-单文件失败不会中止后续文件。退出码 `0` 表示无失败，`1` 表示部分成功，`2` 表示
-全部尝试均失败或参数/环境错误。每个缓存目录的 `process.log` 保存调试信息，终端只显示
-可操作的摘要。
-
-## 测试
+## 验证
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
 .\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m pytest -q
+cmake --build native/build --config Release
+ctest --test-dir native/build -C Release --output-on-failure
+.\.venv\Scripts\python.exe tools\evaluate_quality_cases.py
 ```
 
-自动化测试、现场环境探测、真实音频性能测试和人工听感验收是四种不同证据。当前实机
-记录见 [docs/VALIDATION.md](docs/VALIDATION.md)。
+质量 fixture 的可翻译项为 24/24，四个严重案例全部通过；结构通过仍不代替全音频人工
+听感验收。当前实机证据与尚未完成的视觉门槛见 [docs/VALIDATION.md](docs/VALIDATION.md)。
+
+## 首版边界
+
+不包含波形编辑、日文 ASR 原文修改、自包含安装包、自动模型下载或无提示的外部服务
+回退。EXE 是轻量前端，运行时仍需项目 Python 环境和相应本地工具。

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 1
+TRANSLATION_SCHEMA_VERSION = 2
 
 
 def _number(value: Any, name: str) -> float:
@@ -193,10 +194,18 @@ class FilteredTranscript:
 class TranslationItem:
     id: str
     text: str
+    flags: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TranslationItem:
-        return cls(id=str(data["id"]), text=str(data["text"]).strip())
+        return cls(
+            id=str(data["id"]),
+            text=str(data["text"]).strip(),
+            flags=tuple(str(flag) for flag in data.get("flags", [])),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "text": self.text, "flags": list(self.flags)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,12 +215,17 @@ class Translation:
     created_at: str
     batches: tuple[dict[str, Any], ...]
     items: tuple[TranslationItem, ...]
-    schema_version: int = SCHEMA_VERSION
+    profile_id: str = ""
+    stage: str = "final"
+    draft_model: str = ""
+    review_model: str | None = None
+    prompt_version: str = "context-v4"
+    schema_version: int = TRANSLATION_SCHEMA_VERSION
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Translation:
         version = int(data.get("schema_version", 0))
-        if version != SCHEMA_VERSION:
+        if version != TRANSLATION_SCHEMA_VERSION:
             raise ValueError(f"不支持的 translation schema_version: {version}")
         return cls(
             source=SourceIdentity.from_dict(data["source"]),
@@ -219,6 +233,13 @@ class Translation:
             created_at=str(data["created_at"]),
             batches=tuple(dict(item) for item in data.get("batches", [])),
             items=tuple(TranslationItem.from_dict(item) for item in data.get("items", [])),
+            profile_id=str(data.get("profile_id", "")),
+            stage=str(data.get("stage", "final")),
+            draft_model=str(data.get("draft_model", data.get("model", ""))),
+            review_model=(
+                None if data.get("review_model") is None else str(data["review_model"])
+            ),
+            prompt_version=str(data.get("prompt_version", "context-v4")),
             schema_version=version,
         )
 
@@ -229,7 +250,12 @@ class Translation:
             "model": self.model,
             "created_at": self.created_at,
             "batches": list(self.batches),
-            "items": [asdict(item) for item in self.items],
+            "items": [item.to_dict() for item in self.items],
+            "profile_id": self.profile_id,
+            "stage": self.stage,
+            "draft_model": self.draft_model,
+            "review_model": self.review_model,
+            "prompt_version": self.prompt_version,
         }
 
 
