@@ -20,4 +20,10 @@ WorkerEventEnvelope ParseWorkerEventEnvelope(const std::wstring_view json) {
     return WorkerEventEnvelope{protocol, event};
 }
 
+bool IsTerminalWorkerEvent(const std::wstring_view event) noexcept {
+    return event == L"probe_result" || event == L"result" || event == L"cues" ||
+           event == L"saved" || event == L"playback_ready" || event == L"error" ||
+           event == L"cancelled";
+}
+
 }  // namespace asmr

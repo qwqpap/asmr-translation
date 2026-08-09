@@ -1,6 +1,7 @@
 #include "worker_client.hpp"
 
 #include "utf.hpp"
+#include "worker_protocol.hpp"
 
 #include <array>
 #include <filesystem>
@@ -163,10 +164,15 @@ void WorkerClient::ReaderLoop() {
             }
             try {
                 auto payload = std::make_unique<std::wstring>(Utf8ToWide(line));
+                const auto envelope = ParseWorkerEventEnvelope(*payload);
                 PostMessageW(notify_window_,
                              WM_APP_WORKER_EVENT,
                              static_cast<WPARAM>(channel_),
                              reinterpret_cast<LPARAM>(payload.release()));
+                if (IsTerminalWorkerEvent(envelope.event)) {
+                    std::scoped_lock lock(write_mutex_);
+                    CloseHandleIfSet(stdin_write_);
+                }
             } catch (...) {
             }
         }

@@ -414,7 +414,11 @@ def main() -> int:
         request = json.loads(line.decode("utf-8"))
         if not isinstance(request, dict):
             raise ValueError("请求根节点必须是 JSON 对象")
-        threading.Thread(target=_control_listener, daemon=True).start()
+        # Only long-running translation needs cancellation/consent messages. Keeping a
+        # reader blocked on an open anonymous stdin pipe prevents this Windows worker
+        # from exiting after one-shot commands such as probe/load/save.
+        if request.get("command") == "run":
+            threading.Thread(target=_control_listener, daemon=True).start()
         return dispatch(request)
     except CancelledError as exc:
         _write("cancelled", message=str(exc))

@@ -690,24 +690,32 @@ JsonObject Application::ConfigJson() const {
 
 void Application::StartProbe() {
     if (task_worker_->Running()) {
+        AppendLog(L"已有任务正在运行，请先等待完成或取消。 ");
         return;
     }
     ReadSettingsFromControls();
+    AppendLog(L"正在启动环境探测……");
     JsonObject request;
     PutNumber(request, L"protocol", 1);
     PutString(request, L"command", L"probe");
     request.SetNamedValue(L"config", ConfigJson());
-    if (!task_worker_->Start(settings_.python_path, std::wstring(request.Stringify()))) {
+    if (task_worker_->Start(settings_.python_path, std::wstring(request.Stringify()))) {
+        EnableWindow(probe_, FALSE);
+        EnableWindow(run_, FALSE);
+        EnableWindow(cancel_, TRUE);
+    } else {
         AppendLog(L"无法启动 Python GUI worker，请检查解释器路径。 ");
     }
 }
 
 void Application::StartTask() {
     if (task_worker_->Running()) {
+        AppendLog(L"已有任务正在运行，请先等待完成或取消。 ");
         return;
     }
     const auto root = TextOf(folder_);
     if (root.empty() || !std::filesystem::is_directory(root)) {
+        AppendLog(L"未开始处理：请选择有效的音频文件夹。 ");
         MessageBoxW(window_, L"请选择有效的音频文件夹。", L"ASMR Translation", MB_ICONWARNING);
         return;
     }
@@ -720,6 +728,7 @@ void Application::StartTask() {
     ListView_DeleteAllItems(task_list_);
     SendMessageW(task_progress_, PBM_SETPOS, 0, 0);
     if (task_worker_->Start(settings_.python_path, std::wstring(request.Stringify()))) {
+        EnableWindow(probe_, FALSE);
         EnableWindow(run_, FALSE);
         EnableWindow(cancel_, TRUE);
         AppendLog(L"任务已启动。 ");
@@ -937,6 +946,7 @@ void Application::HandleWorkerEvent(const WorkerChannel channel, const std::wstr
 
 void Application::HandleWorkerDone(const WorkerChannel channel, const DWORD exit_code) {
     if (channel == WorkerChannel::Task) {
+        EnableWindow(probe_, TRUE);
         EnableWindow(run_, TRUE);
         EnableWindow(cancel_, FALSE);
         KillTimer(window_, kCancelTimer);

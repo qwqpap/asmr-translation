@@ -181,6 +181,12 @@ int wmain() {
         rejected_protocol = true;
     }
     Check(rejected_protocol, "reject unknown worker protocol");
+    Check(asmr::IsTerminalWorkerEvent(L"probe_result"), "probe result is terminal");
+    Check(asmr::IsTerminalWorkerEvent(L"result"), "pipeline result is terminal");
+    Check(asmr::IsTerminalWorkerEvent(L"error"), "worker error is terminal");
+    Check(!asmr::IsTerminalWorkerEvent(L"log"), "worker log is not terminal");
+    Check(!asmr::IsTerminalWorkerEvent(L"consent_request"),
+          "consent request keeps worker input open");
 
     const wchar_t* media_window_class = L"AsmrTranslationNativeTestWindow";
     WNDCLASSW window_class{};

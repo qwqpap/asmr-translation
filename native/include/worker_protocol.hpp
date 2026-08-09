@@ -11,5 +11,6 @@ struct WorkerEventEnvelope {
 };
 
 WorkerEventEnvelope ParseWorkerEventEnvelope(std::wstring_view json);
+bool IsTerminalWorkerEvent(std::wstring_view event) noexcept;
 
 }  // namespace asmr
