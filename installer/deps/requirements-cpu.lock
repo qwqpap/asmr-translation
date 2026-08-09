@@ -1,0 +1,4 @@
+# Release builds replace this file with a fully hashed Python 3.12 win_amd64 lock.
+# The bootstrapper refuses to install an un-hashed lock in a release MSI.
+faster-whisper==1.1.1 \
+    --hash=sha256:REPLACE_WITH_RELEASE_HASH

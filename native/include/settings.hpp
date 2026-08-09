@@ -25,6 +25,8 @@ struct AppSettings {
     std::wstring download_proxy;
     int download_connect_timeout = 10;
     bool download_notice_shown = false;
+    bool setup_prompted = false;
+    bool setup_completed = false;
     ProviderSettings draft;
     ProviderSettings review;
     bool review_same_as_draft = true;
@@ -32,8 +34,14 @@ struct AppSettings {
 };
 
 std::filesystem::path SettingsPath();
+std::filesystem::path ApplicationInstallDirectory();
+std::filesystem::path ApplicationDataDirectory();
+std::filesystem::path BootstrapScriptPath();
+std::filesystem::path BootstrapManifestPath();
+std::filesystem::path EmbeddedRuntimeRoot();
 std::wstring FindPythonInterpreter();
 std::wstring FindFfmpegExecutable();
+bool IsEmbeddedPython(const std::wstring& path);
 AppSettings LoadSettings();
 void SaveSettings(const AppSettings& settings);
 AppSettings ParseSettingsUtf8(std::string_view json, AppSettings defaults = {});

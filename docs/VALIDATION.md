@@ -1,7 +1,7 @@
-# v0.2 验证记录
+# v0.3 验证记录
 
-日期：2026-08-09
-版本：0.2.0
+日期：2026-08-10
+版本：0.3.0
 
 ## 已完成证据
 
@@ -40,3 +40,14 @@
 本轮 Computer Use 在窗口状态捕获时连续返回 `node_repl exec context not found`，因此没有
 用自动注入冒充最终 GUI 人工验收。原生媒体消息循环和缓存/worker 自动测试是补充证据，
 不替代上述视觉与听感门槛。
+
+## MSI 骨架验证
+
+- WiX v4 工程、当前用户目录、开始菜单快捷方式和升级代码已加入 `installer/`。
+- GUI 已支持安装版嵌入式 Python 路径，并在检测到安装器引导资源且没有可用 Python 时
+  显示依赖向导。
+- `bootstrap.ps1` 已通过 Windows PowerShell 5.1 语法检查，具备 `.part`、Range 续传、
+  SHA-256、压缩包目录穿越保护和 JSONL 事件输出。
+- 当前工作机没有 WiX，且 manifest/CPU/CUDA lock 仍是待发布版本的占位哈希，因此尚未
+  生成可发布 MSI；这不是通过自动测试伪造的绿灯。填充固定依赖哈希后运行
+  `docs/BUILD_INSTALLER.md` 的命令完成发布前构建和普通用户实窗验收。

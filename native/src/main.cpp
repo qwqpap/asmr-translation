@@ -1,4 +1,5 @@
 #include "app_messages.hpp"
+#include "bootstrap_client.hpp"
 #include "lrc.hpp"
 #include "lyrics_view.hpp"
 #include "media_player.hpp"
@@ -42,6 +43,7 @@ constexpr wchar_t kProjectUrl[] = L"https://github.com/qwqpap/asmr-translation";
 constexpr UINT_PTR kPlayerTimer = 1;
 constexpr UINT_PTR kCancelTimer = 2;
 constexpr UINT_PTR kDownloadCancelTimer = 3;
+constexpr wchar_t kSetupClass[] = L"ASMRTranslationSetupWindow";
 
 enum ControlId : int {
     IdTab = 10,
@@ -101,6 +103,19 @@ enum ControlId : int {
     IdDownloadProgress,
     IdDownloadFiles,
     IdDownloadLog,
+    IdSetupPython = 500,
+    IdSetupAsr,
+    IdSetupFfmpeg,
+    IdSetupModel,
+    IdSetupCpu,
+    IdSetupCuda,
+    IdSetupMirror,
+    IdSetupInstall,
+    IdSetupCancel,
+    IdSetupSkip,
+    IdSetupProgress,
+    IdSetupLog,
+    IdSetupOpen,
 };
 
 std::wstring TextOf(const HWND control) {
@@ -272,6 +287,19 @@ private:
     void HandlePlan(const JsonObject& event);
     void HandleDownloadMetadata(const JsonObject& event);
     void HandleCues(const JsonObject& event);
+    void MaybeShowSetupWizard();
+    void ShowSetupWizard();
+    void CloseSetupWizard(bool completed = false);
+    void StartBootstrap();
+    void HandleBootstrapEvent(const std::wstring& json);
+    void HandleBootstrapDone(DWORD exit_code);
+    LRESULT HandleSetupMessage(UINT message, WPARAM wparam, LPARAM lparam);
+    static LRESULT CALLBACK SetupWindowProc(HWND window,
+                                             UINT message,
+                                             WPARAM wparam,
+                                             LPARAM lparam);
+    void LayoutSetupWindow();
+    void AppendSetupLog(const std::wstring& line);
     void UpdatePlayer();
     void NavigatePlaylist(int direction);
 
@@ -344,12 +372,31 @@ private:
     HWND download_proxy_{};
     HWND download_timeout_{};
     HWND save_settings_{};
+    HWND setup_open_{};
     std::vector<HWND> setting_labels_;
+
+    HWND setup_window_{};
+    HWND setup_intro_{};
+    HWND setup_heading_{};
+    HWND setup_mirror_label_{};
+    HWND setup_python_{};
+    HWND setup_asr_{};
+    HWND setup_ffmpeg_{};
+    HWND setup_model_{};
+    HWND setup_cpu_{};
+    HWND setup_cuda_{};
+    HWND setup_mirror_{};
+    HWND setup_install_{};
+    HWND setup_cancel_{};
+    HWND setup_skip_{};
+    HWND setup_progress_{};
+    HWND setup_log_{};
 
     asmr::AppSettings settings_;
     std::unique_ptr<asmr::WorkerClient> task_worker_;
     std::unique_ptr<asmr::WorkerClient> utility_worker_;
     std::unique_ptr<asmr::WorkerClient> download_worker_;
+    std::unique_ptr<asmr::BootstrapClient> bootstrap_client_;
     UtilityAction utility_action_{UtilityAction::None};
     asmr::MediaPlayer player_;
     std::filesystem::path current_audio_;
@@ -363,6 +410,9 @@ private:
     std::vector<bool> download_file_audio_;
     std::vector<bool> download_file_smart_;
     std::deque<std::filesystem::path> pending_download_tasks_;
+    std::wstring bootstrap_python_path_;
+    std::wstring bootstrap_ffmpeg_path_;
+    std::wstring bootstrap_model_path_;
     UINT dpi_{96};
     HFONT ui_font_{};
 };
@@ -602,6 +652,7 @@ void Application::CreateSettingsPage() {
                              settings_page_,
                              IdQuality);
     save_settings_ = CreateControl(L"BUTTON", L"保存设置", BS_DEFPUSHBUTTON, settings_page_, IdSaveSettings);
+    setup_open_ = CreateControl(L"BUTTON", L"依赖向导", BS_PUSHBUTTON, settings_page_, IdSetupOpen);
 }
 
 void Application::Layout() {
@@ -728,6 +779,7 @@ void Application::Layout() {
     }
     MoveWindow(quality_, scale(170), y, scale(320), scale(28), TRUE);
     MoveWindow(save_settings_, width - scale(130), y, scale(110), scale(30), TRUE);
+    MoveWindow(setup_open_, width - scale(250), y, scale(110), scale(30), TRUE);
 }
 
 void Application::SelectPage() {
@@ -848,7 +900,386 @@ void Application::ApplyUiFont() {
                 return TRUE;
             },
             reinterpret_cast<LPARAM>(ui_font_));
+        if (setup_window_ != nullptr) {
+            EnumChildWindows(
+                setup_window_,
+                [](const HWND child, const LPARAM font) -> BOOL {
+                    SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(font), TRUE);
+                    return TRUE;
+                },
+                reinterpret_cast<LPARAM>(ui_font_));
+        }
     }
+}
+
+void Application::AppendSetupLog(const std::wstring& line) {
+    if (setup_log_ == nullptr) {
+        return;
+    }
+    const auto length = GetWindowTextLengthW(setup_log_);
+    SendMessageW(setup_log_, EM_SETSEL, length, length);
+    const auto with_newline = line + L"\r\n";
+    SendMessageW(setup_log_, EM_REPLACESEL, FALSE,
+                 reinterpret_cast<LPARAM>(with_newline.c_str()));
+    SendMessageW(setup_log_, EM_SCROLLCARET, 0, 0);
+}
+
+void Application::LayoutSetupWindow() {
+    if (setup_window_ == nullptr) {
+        return;
+    }
+    RECT client{};
+    GetClientRect(setup_window_, &client);
+    const auto scale = [this](const int value) {
+        return MulDiv(value, static_cast<int>(dpi_), 96);
+    };
+    const int width = client.right;
+    MoveWindow(setup_intro_, scale(24), scale(16), width - scale(48), scale(36), TRUE);
+    MoveWindow(setup_heading_, scale(24), scale(44), width - scale(48), scale(22), TRUE);
+    MoveWindow(setup_python_, scale(24), scale(60), width - scale(48), scale(28), TRUE);
+    MoveWindow(setup_asr_, scale(24), scale(92), width - scale(48), scale(28), TRUE);
+    MoveWindow(setup_ffmpeg_, scale(24), scale(124), width - scale(48), scale(28), TRUE);
+    MoveWindow(setup_model_, scale(24), scale(156), width - scale(48), scale(28), TRUE);
+    MoveWindow(setup_cpu_, scale(24), scale(196), scale(110), scale(28), TRUE);
+    MoveWindow(setup_cuda_, scale(140), scale(196), scale(150), scale(28), TRUE);
+    MoveWindow(setup_mirror_label_, scale(24), scale(220), width - scale(48), scale(18), TRUE);
+    MoveWindow(setup_mirror_, scale(24), scale(238), width - scale(48), scale(28), TRUE);
+    MoveWindow(setup_progress_, scale(24), scale(278), width - scale(48), scale(18), TRUE);
+    MoveWindow(setup_log_, scale(24), scale(304), width - scale(48), scale(92), TRUE);
+    MoveWindow(setup_install_, width - scale(320), scale(414), scale(92), scale(30), TRUE);
+    MoveWindow(setup_cancel_, width - scale(220), scale(414), scale(92), scale(30), TRUE);
+    MoveWindow(setup_skip_, width - scale(120), scale(414), scale(92), scale(30), TRUE);
+}
+
+void Application::ShowSetupWizard() {
+    if (setup_window_ != nullptr) {
+        SetForegroundWindow(setup_window_);
+        return;
+    }
+    WNDCLASSEXW window_class{sizeof(WNDCLASSEXW)};
+    window_class.lpfnWndProc = SetupWindowProc;
+    window_class.hInstance = instance_;
+    window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    window_class.lpszClassName = kSetupClass;
+    if (!GetClassInfoExW(instance_, kSetupClass, &window_class)) {
+        if (!RegisterClassExW(&window_class) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            MessageBoxW(window_, L"无法创建依赖向导窗口。", L"ASMR Translation", MB_ICONERROR);
+            return;
+        }
+    }
+    setup_window_ = CreateWindowExW(WS_EX_DLGMODALFRAME,
+                                    kSetupClass,
+                                    L"ASMR Translation 依赖向导",
+                                    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                                    CW_USEDEFAULT,
+                                    CW_USEDEFAULT,
+                                    MulDiv(680, static_cast<int>(dpi_), 96),
+                                    MulDiv(500, static_cast<int>(dpi_), 96),
+                                    window_,
+                                    nullptr,
+                                    instance_,
+                                    this);
+    if (setup_window_ == nullptr) {
+        MessageBoxW(window_, L"无法创建依赖向导窗口。", L"ASMR Translation", MB_ICONERROR);
+        return;
+    }
+    EnableWindow(window_, FALSE);
+    RECT owner{};
+    RECT dialog{};
+    GetWindowRect(window_, &owner);
+    GetWindowRect(setup_window_, &dialog);
+    const int x = owner.left + ((owner.right - owner.left) - (dialog.right - dialog.left)) / 2;
+    const int y = owner.top + ((owner.bottom - owner.top) - (dialog.bottom - dialog.top)) / 2;
+    SetWindowPos(setup_window_, HWND_TOP, x, y, 0, 0, SWP_NOSIZE);
+    ShowWindow(setup_window_, SW_SHOW);
+    UpdateWindow(setup_window_);
+    ApplyUiFont();
+}
+
+void Application::CloseSetupWizard(const bool completed) {
+    if (setup_window_ == nullptr) {
+        return;
+    }
+    if (bootstrap_client_ != nullptr && bootstrap_client_->Running()) {
+        bootstrap_client_->Cancel();
+        return;
+    }
+    if (!completed) {
+        settings_.setup_prompted = true;
+        try {
+            asmr::SaveSettings(settings_);
+        } catch (...) {
+        }
+    }
+    EnableWindow(window_, TRUE);
+    DestroyWindow(setup_window_);
+    setup_window_ = nullptr;
+    SetForegroundWindow(window_);
+}
+
+void Application::MaybeShowSetupWizard() {
+    if (setup_window_ != nullptr || settings_.setup_prompted) {
+        return;
+    }
+    const auto python = std::filesystem::path(settings_.python_path);
+    if (std::filesystem::is_regular_file(python) && !asmr::IsEmbeddedPython(settings_.python_path)) {
+        settings_.setup_prompted = true;
+        try {
+            asmr::SaveSettings(settings_);
+        } catch (...) {
+        }
+        return;
+    }
+    if (!std::filesystem::is_regular_file(asmr::BootstrapScriptPath()) ||
+        !std::filesystem::is_regular_file(asmr::BootstrapManifestPath())) {
+        return;
+    }
+    ShowSetupWizard();
+}
+
+void Application::StartBootstrap() {
+    if (bootstrap_client_ == nullptr || bootstrap_client_->Running()) {
+        return;
+    }
+    if (Button_GetCheck(setup_python_) != BST_CHECKED ||
+        Button_GetCheck(setup_asr_) != BST_CHECKED) {
+        MessageBoxW(setup_window_, L"必须勾选 Python 运行时和 ASR 依赖。",
+                    L"ASMR Translation", MB_ICONWARNING);
+        return;
+    }
+    const auto script = asmr::BootstrapScriptPath();
+    const auto manifest = asmr::BootstrapManifestPath();
+    if (!std::filesystem::is_regular_file(script) || !std::filesystem::is_regular_file(manifest)) {
+        AppendSetupLog(L"找不到安装器引导资源；开发环境请继续使用 .venv，发布版请重新安装。 ");
+        return;
+    }
+    asmr::BootstrapOptions options;
+    options.script_path = script;
+    options.plan_path = manifest;
+    options.state_root = asmr::ApplicationDataDirectory();
+    options.mirror_base = TextOf(setup_mirror_);
+    options.accelerator = Button_GetCheck(setup_cuda_) == BST_CHECKED ? L"cuda" : L"cpu";
+    options.install_ffmpeg = Button_GetCheck(setup_ffmpeg_) == BST_CHECKED;
+    options.install_model = Button_GetCheck(setup_model_) == BST_CHECKED;
+    SendMessageW(setup_progress_, PBM_SETPOS, 0, 0);
+    SetText(setup_log_, L"");
+    AppendSetupLog(L"开始安装所选依赖；不会上传音频或 API Key。 ");
+    bootstrap_python_path_.clear();
+    bootstrap_ffmpeg_path_.clear();
+    bootstrap_model_path_.clear();
+    if (!bootstrap_client_->Start(options)) {
+        AppendSetupLog(L"无法启动 PowerShell 引导进程。 ");
+        return;
+    }
+    EnableWindow(setup_install_, FALSE);
+    EnableWindow(setup_skip_, FALSE);
+    EnableWindow(setup_cancel_, TRUE);
+    EnableWindow(setup_python_, FALSE);
+    EnableWindow(setup_asr_, FALSE);
+    EnableWindow(setup_ffmpeg_, FALSE);
+    EnableWindow(setup_model_, FALSE);
+    EnableWindow(setup_cpu_, FALSE);
+    EnableWindow(setup_cuda_, FALSE);
+    EnableWindow(setup_mirror_, FALSE);
+}
+
+void Application::HandleBootstrapEvent(const std::wstring& json) {
+    JsonObject event;
+    try {
+        event = JsonObject::Parse(json);
+    } catch (...) {
+        return;
+    }
+    const auto name = std::wstring(event.GetNamedString(L"event", L""));
+    if (name == L"download_progress") {
+        const auto received = event.GetNamedNumber(L"received", 0);
+        const auto total = event.GetNamedNumber(L"total", 0);
+        const auto progress = total > 0 ? std::clamp(received / total, 0.0, 1.0) * 10000.0 : 0.0;
+        SendMessageW(setup_progress_, PBM_SETPOS, static_cast<WPARAM>(progress), 0);
+        AppendSetupLog(std::format(L"下载 {}：{:.1f}%",
+                                   std::wstring(event.GetNamedString(L"name", L"文件")),
+                                   progress / 100.0));
+    } else if (name == L"download_start") {
+        AppendSetupLog(L"开始下载 " + std::wstring(event.GetNamedString(L"name", L"文件")) + L"……");
+    } else if (name == L"verify") {
+        AppendSetupLog(L"校验完成：" + std::wstring(event.GetNamedString(L"name", L"文件")));
+    } else if (name == L"install") {
+        AppendSetupLog(L"正在安装 " + std::wstring(event.GetNamedString(L"name", L"依赖")) + L"……");
+    } else if (name == L"complete") {
+        bootstrap_python_path_ = std::wstring(event.GetNamedString(L"python", L""));
+        bootstrap_ffmpeg_path_ = std::wstring(event.GetNamedString(L"ffmpeg", L""));
+        bootstrap_model_path_ = std::wstring(event.GetNamedString(L"model", L""));
+        AppendSetupLog(L"依赖安装完成，正在写入设置。 ");
+    } else if (name == L"error") {
+        AppendSetupLog(L"引导失败：" + std::wstring(event.GetNamedString(L"message", L"未知错误")));
+    }
+}
+
+void Application::HandleBootstrapDone(const DWORD exit_code) {
+    if (setup_window_ == nullptr) {
+        return;
+    }
+    EnableWindow(setup_install_, TRUE);
+    EnableWindow(setup_skip_, TRUE);
+    EnableWindow(setup_cancel_, FALSE);
+    EnableWindow(setup_python_, TRUE);
+    EnableWindow(setup_asr_, TRUE);
+    EnableWindow(setup_ffmpeg_, TRUE);
+    EnableWindow(setup_model_, TRUE);
+    EnableWindow(setup_cpu_, TRUE);
+    EnableWindow(setup_cuda_, TRUE);
+    EnableWindow(setup_mirror_, TRUE);
+    if (exit_code == 0) {
+        if (bootstrap_python_path_.empty()) {
+            bootstrap_python_path_ = (asmr::EmbeddedRuntimeRoot() / L"python.exe").wstring();
+        }
+        settings_.python_path = bootstrap_python_path_;
+        if (!bootstrap_ffmpeg_path_.empty()) {
+            settings_.ffmpeg_path = bootstrap_ffmpeg_path_;
+        }
+        if (!bootstrap_model_path_.empty()) {
+            settings_.asr_model = bootstrap_model_path_;
+        }
+        settings_.setup_prompted = true;
+        settings_.setup_completed = true;
+        try {
+            asmr::SaveSettings(settings_);
+            LoadSettingsIntoControls();
+            AppendLog(L"依赖向导完成，已配置嵌入式 Python。 ");
+            CloseSetupWizard(true);
+        } catch (const std::exception& error) {
+            AppendSetupLog(asmr::Utf8ToWide(error.what()));
+        }
+    } else {
+        AppendSetupLog(std::format(L"引导进程退出码：{}。可修正镜像或取消选项后重试。 ", exit_code));
+    }
+}
+
+LRESULT CALLBACK Application::SetupWindowProc(const HWND window,
+                                               const UINT message,
+                                               const WPARAM wparam,
+                                               const LPARAM lparam) {
+    Application* self = nullptr;
+    if (message == WM_NCCREATE) {
+        const auto* create = reinterpret_cast<CREATESTRUCTW*>(lparam);
+        self = static_cast<Application*>(create->lpCreateParams);
+        self->setup_window_ = window;
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    } else {
+        self = reinterpret_cast<Application*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    }
+    return self != nullptr ? self->HandleSetupMessage(message, wparam, lparam)
+                           : DefWindowProcW(window, message, wparam, lparam);
+}
+
+LRESULT Application::HandleSetupMessage(const UINT message,
+                                        const WPARAM wparam,
+                                        const LPARAM lparam) {
+    switch (message) {
+        case WM_CREATE:
+            setup_intro_ = CreateControl(
+                L"STATIC",
+                L"首次运行需要准备本地 Python/ASR 依赖。勾选项目并点击“安装所选”后才会联网。",
+                SS_LEFT | SS_WORDELLIPSIS,
+                setup_window_,
+                0);
+            setup_heading_ = CreateControl(L"STATIC", L"依赖选择", SS_LEFT | SS_CENTERIMAGE,
+                                           setup_window_, 0);
+            setup_python_ = CreateControl(L"BUTTON", L"Python 3.12 Embeddable 运行时",
+                                          BS_AUTOCHECKBOX, setup_window_, IdSetupPython);
+            setup_asr_ = CreateControl(L"BUTTON", L"ASR Python 依赖（faster-whisper）",
+                                       BS_AUTOCHECKBOX, setup_window_, IdSetupAsr);
+            setup_ffmpeg_ = CreateControl(L"BUTTON", L"可选：下载 FFmpeg",
+                                          BS_AUTOCHECKBOX, setup_window_, IdSetupFfmpeg);
+            setup_model_ = CreateControl(L"BUTTON", L"可选：下载 Whisper large-v3 模型（默认关闭）",
+                                         BS_AUTOCHECKBOX, setup_window_, IdSetupModel);
+            setup_cpu_ = CreateControl(L"BUTTON", L"CPU", BS_AUTORADIOBUTTON,
+                                       setup_window_, IdSetupCpu);
+            setup_cuda_ = CreateControl(L"BUTTON", L"NVIDIA CUDA 12", BS_AUTORADIOBUTTON,
+                                        setup_window_, IdSetupCuda);
+            setup_mirror_label_ = CreateControl(L"STATIC", L"镜像 Base URL（留空使用官方源）",
+                                                SS_LEFT | SS_CENTERIMAGE, setup_window_, 0);
+            setup_mirror_ = CreateControl(L"EDIT", L"", ES_AUTOHSCROLL,
+                                          setup_window_, IdSetupMirror, WS_EX_CLIENTEDGE);
+            setup_progress_ = CreateControl(PROGRESS_CLASSW, L"", 0,
+                                            setup_window_, IdSetupProgress);
+            setup_log_ = CreateControl(L"EDIT", L"", ES_MULTILINE | ES_AUTOVSCROLL |
+                                       ES_READONLY | WS_VSCROLL, setup_window_, IdSetupLog,
+                                       WS_EX_CLIENTEDGE);
+            setup_install_ = CreateControl(L"BUTTON", L"安装所选", BS_DEFPUSHBUTTON,
+                                           setup_window_, IdSetupInstall);
+            setup_cancel_ = CreateControl(L"BUTTON", L"取消", BS_PUSHBUTTON,
+                                          setup_window_, IdSetupCancel);
+            setup_skip_ = CreateControl(L"BUTTON", L"稍后设置", BS_PUSHBUTTON,
+                                        setup_window_, IdSetupSkip);
+            Button_SetCheck(setup_python_, BST_CHECKED);
+            Button_SetCheck(setup_asr_, BST_CHECKED);
+            Button_SetCheck(setup_cpu_, BST_CHECKED);
+            EnableWindow(setup_cancel_, FALSE);
+            LayoutSetupWindow();
+            return 0;
+        case WM_SIZE:
+            LayoutSetupWindow();
+            return 0;
+        case WM_DPICHANGED: {
+            dpi_ = HIWORD(wparam);
+            const auto* suggested = reinterpret_cast<RECT*>(lparam);
+            SetWindowPos(setup_window_,
+                         nullptr,
+                         suggested->left,
+                         suggested->top,
+                         suggested->right - suggested->left,
+                         suggested->bottom - suggested->top,
+                         SWP_NOACTIVATE | SWP_NOZORDER);
+            ApplyUiFont();
+            LayoutSetupWindow();
+            return 0;
+        }
+        case WM_COMMAND:
+            switch (LOWORD(wparam)) {
+                case IdSetupCpu:
+                    if (HIWORD(wparam) == BN_CLICKED) {
+                        Button_SetCheck(setup_cpu_, BST_CHECKED);
+                        Button_SetCheck(setup_cuda_, BST_UNCHECKED);
+                    }
+                    return 0;
+                case IdSetupCuda:
+                    if (HIWORD(wparam) == BN_CLICKED) {
+                        Button_SetCheck(setup_cuda_, BST_CHECKED);
+                        Button_SetCheck(setup_cpu_, BST_UNCHECKED);
+                    }
+                    return 0;
+                case IdSetupInstall:
+                    StartBootstrap();
+                    return 0;
+                case IdSetupCancel:
+                    if (bootstrap_client_ != nullptr && bootstrap_client_->Running()) {
+                        bootstrap_client_->Cancel();
+                        AppendSetupLog(L"已请求取消；临时文件会保留以便下次恢复。 ");
+                    } else {
+                        CloseSetupWizard();
+                    }
+                    return 0;
+                case IdSetupSkip:
+                    CloseSetupWizard();
+                    return 0;
+                default:
+                    break;
+            }
+            return 0;
+        case WM_CLOSE:
+            if (bootstrap_client_ != nullptr && bootstrap_client_->Running()) {
+                MessageBoxW(setup_window_, L"请先取消当前引导任务。", L"ASMR Translation",
+                            MB_ICONINFORMATION);
+                return 0;
+            }
+            CloseSetupWizard();
+            return 0;
+        default:
+            break;
+    }
+    return DefWindowProcW(setup_window_, message, wparam, lparam);
 }
 
 JsonObject Application::ProviderJson(const asmr::ProviderSettings& provider,
@@ -1449,6 +1880,7 @@ LRESULT Application::HandleMessage(const UINT message, const WPARAM wparam, cons
             task_worker_ = std::make_unique<asmr::WorkerClient>(window_, WorkerChannel::Task);
             utility_worker_ = std::make_unique<asmr::WorkerClient>(window_, WorkerChannel::Utility);
             download_worker_ = std::make_unique<asmr::WorkerClient>(window_, WorkerChannel::Download);
+            bootstrap_client_ = std::make_unique<asmr::BootstrapClient>(window_);
             if (player_.Initialize(window_)) {
                 player_.SetVolume(0.8);
             } else {
@@ -1456,6 +1888,7 @@ LRESULT Application::HandleMessage(const UINT message, const WPARAM wparam, cons
                 AppendLog(L"Media Foundation 播放器初始化失败。 ");
             }
             SetTimer(window_, kPlayerTimer, 50, nullptr);
+            PostMessageW(window_, WM_APP_SETUP_SHOW, 0, 0);
             return 0;
         case WM_SIZE:
             Layout();
@@ -1572,6 +2005,8 @@ LRESULT Application::HandleMessage(const UINT message, const WPARAM wparam, cons
                 } catch (const std::exception& error) {
                     MessageBoxW(window_, asmr::Utf8ToWide(error.what()).c_str(), L"保存失败", MB_ICONERROR);
                 }
+            } else if (id == IdSetupOpen) {
+                ShowSetupWizard();
             }
             return 0;
         }
@@ -1627,6 +2062,17 @@ LRESULT Application::HandleMessage(const UINT message, const WPARAM wparam, cons
                 }
             }
             return 0;
+        case WM_APP_SETUP_SHOW:
+            MaybeShowSetupWizard();
+            return 0;
+        case WM_APP_BOOTSTRAP_EVENT: {
+            std::unique_ptr<std::wstring> payload(reinterpret_cast<std::wstring*>(lparam));
+            HandleBootstrapEvent(*payload);
+            return 0;
+        }
+        case WM_APP_BOOTSTRAP_DONE:
+            HandleBootstrapDone(static_cast<DWORD>(lparam));
+            return 0;
         case WM_APP_LYRIC_CLICK: {
             const auto index = static_cast<std::size_t>(wparam);
             if (index < lyrics_.Cues().size()) {
@@ -1652,7 +2098,8 @@ LRESULT Application::HandleMessage(const UINT message, const WPARAM wparam, cons
         case WM_CLOSE:
             if ((task_worker_ && task_worker_->Running()) ||
                 (utility_worker_ && utility_worker_->Running()) ||
-                (download_worker_ && download_worker_->Running())) {
+                (download_worker_ && download_worker_->Running()) ||
+                (bootstrap_client_ && bootstrap_client_->Running())) {
                 const auto answer = MessageBoxW(window_,
                                                 L"仍有任务运行。关闭会终止任务进程树，是否继续？",
                                                 L"ASMR Translation",
@@ -1667,6 +2114,13 @@ LRESULT Application::HandleMessage(const UINT message, const WPARAM wparam, cons
             KillTimer(window_, kPlayerTimer);
             task_worker_.reset();
             utility_worker_.reset();
+            download_worker_.reset();
+            bootstrap_client_.reset();
+            if (setup_window_ != nullptr) {
+                EnableWindow(window_, TRUE);
+                DestroyWindow(setup_window_);
+                setup_window_ = nullptr;
+            }
             if (ui_font_ != nullptr) {
                 DeleteObject(ui_font_);
                 ui_font_ = nullptr;

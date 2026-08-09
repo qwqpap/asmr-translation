@@ -20,14 +20,13 @@ namespace {
 using winrt::Windows::Data::Json::JsonObject;
 using winrt::Windows::Data::Json::JsonValue;
 
-std::filesystem::path ApplicationDataDirectory() {
+std::filesystem::path LocalAppDataRoot() {
     PWSTR raw = nullptr;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &raw))) {
         throw std::runtime_error("cannot locate LocalAppData");
     }
     const std::filesystem::path directory = std::filesystem::path(raw) / L"ASMR Translation";
     CoTaskMemFree(raw);
-    std::filesystem::create_directories(directory);
     return directory;
 }
 
@@ -63,6 +62,9 @@ std::filesystem::path ProjectRootFromPython(const std::wstring& python_path) {
     if (_wcsicmp(scripts.filename().c_str(), L"Scripts") == 0 &&
         _wcsicmp(environment.filename().c_str(), L".venv") == 0) {
         return environment.parent_path();
+    }
+    if (IsEmbeddedPython(python_path)) {
+        return LocalAppDataRoot();
     }
     return std::filesystem::current_path();
 }
@@ -108,8 +110,45 @@ JsonObject ProviderJson(const ProviderSettings& provider) {
 
 }  // namespace
 
+std::filesystem::path ApplicationDataDirectory() {
+    const auto directory = LocalAppDataRoot();
+    std::filesystem::create_directories(directory);
+    return directory;
+}
+
+std::filesystem::path ApplicationInstallDirectory() {
+    PWSTR raw = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &raw))) {
+        const auto directory = std::filesystem::path(raw) / L"Programs" / L"ASMR Translation";
+        CoTaskMemFree(raw);
+        return directory;
+    }
+    return std::filesystem::current_path();
+}
+
+std::filesystem::path BootstrapScriptPath() {
+    return ApplicationInstallDirectory() / L"bootstrap" / L"bootstrap.ps1";
+}
+
+std::filesystem::path BootstrapManifestPath() {
+    return ApplicationInstallDirectory() / L"manifest" / L"artifacts.json";
+}
+
+std::filesystem::path EmbeddedRuntimeRoot() {
+    return ApplicationDataDirectory() / L"runtime" / L"python-3.12-embed-amd64";
+}
+
 std::filesystem::path SettingsPath() {
     return ApplicationDataDirectory() / L"settings.json";
+}
+
+bool IsEmbeddedPython(const std::wstring& path) {
+    if (path.empty()) {
+        return false;
+    }
+    const auto candidate = std::filesystem::path(path);
+    return _wcsicmp(candidate.filename().c_str(), L"python.exe") == 0 &&
+           _wcsicmp(candidate.parent_path().filename().c_str(), L"python-3.12-embed-amd64") == 0;
 }
 
 std::wstring FindPythonInterpreter() {
@@ -130,6 +169,10 @@ std::wstring FindPythonInterpreter() {
             return candidate.wstring();
         }
     }
+    const auto embedded = EmbeddedRuntimeRoot() / L"python.exe";
+    if (std::filesystem::is_regular_file(embedded)) {
+        return embedded.wstring();
+    }
     return L"python";
 }
 
@@ -143,7 +186,9 @@ AppSettings LoadSettings() {
     defaults.ffmpeg_path = FindFfmpegExecutable();
     const auto project_root = ProjectRootFromPython(defaults.python_path);
     defaults.asr_model = FindAsrModel(project_root);
-    defaults.cache_root = (project_root / L".cache").wstring();
+    defaults.cache_root = IsEmbeddedPython(defaults.python_path)
+                              ? (project_root / L"cache").wstring()
+                              : (project_root / L".cache").wstring();
     defaults.download_root = DefaultDownloadRoot();
     defaults.download_endpoint = L"https://api.asmr-200.com";
     defaults.download_connect_timeout = 10;
@@ -187,6 +232,8 @@ AppSettings ParseSettingsUtf8(const std::string_view json, AppSettings defaults)
     }
     defaults.download_notice_shown =
         BoolOr(root, L"download_notice_shown", defaults.download_notice_shown);
+    defaults.setup_prompted = BoolOr(root, L"setup_prompted", defaults.setup_prompted);
+    defaults.setup_completed = BoolOr(root, L"setup_completed", defaults.setup_completed);
     defaults.review_same_as_draft =
         BoolOr(root, L"review_same_as_draft", defaults.review_same_as_draft);
     defaults.quality_mode = BoolOr(root, L"quality_mode", defaults.quality_mode);
@@ -216,6 +263,10 @@ std::string SerializeSettingsUtf8(const AppSettings& settings) {
                        JsonValue::CreateNumberValue(settings.download_connect_timeout));
     root.SetNamedValue(L"download_notice_shown",
                        JsonValue::CreateBooleanValue(settings.download_notice_shown));
+    root.SetNamedValue(L"setup_prompted",
+                       JsonValue::CreateBooleanValue(settings.setup_prompted));
+    root.SetNamedValue(L"setup_completed",
+                       JsonValue::CreateBooleanValue(settings.setup_completed));
     root.SetNamedValue(L"review_same_as_draft",
                        JsonValue::CreateBooleanValue(settings.review_same_as_draft));
     root.SetNamedValue(L"quality_mode", JsonValue::CreateBooleanValue(settings.quality_mode));

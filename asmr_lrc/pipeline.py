@@ -6,6 +6,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import __version__
 from .asr import run_asr_process
 from .cache import (
     atomic_write_json,
@@ -238,7 +239,7 @@ def _write_source_metadata(path: Path, source: SourceIdentity) -> None:
         {
             "schema_version": 1,
             "source": source.to_dict(),
-            "tool_version": "0.2.0",
+            "tool_version": __version__,
             "updated_at": datetime.now(UTC).isoformat(),
         },
     )

@@ -165,6 +165,8 @@ int wmain() {
     settings.curl_path = L"C:\\工具\\curl.exe";
     settings.download_proxy = L"http://127.0.0.1:8080";
     settings.download_connect_timeout = 17;
+    settings.setup_prompted = true;
+    settings.setup_completed = false;
     settings.draft.kind = L"openai";
     settings.draft.base_url = L"https://example.test/v1";
     settings.draft.model = L"draft-model";
@@ -178,6 +180,12 @@ int wmain() {
     Check(loaded.download_endpoint == settings.download_endpoint, "settings download endpoint");
     Check(loaded.download_connect_timeout == settings.download_connect_timeout,
           "settings download timeout");
+    Check(loaded.setup_prompted == settings.setup_prompted, "settings setup prompted");
+    Check(loaded.setup_completed == settings.setup_completed, "settings setup completed");
+    Check(asmr::IsEmbeddedPython(
+              L"C:\\Users\\测试\\AppData\\Local\\ASMR Translation\\runtime\\"
+              L"python-3.12-embed-amd64\\python.exe"),
+          "recognize embedded Python path");
     Check(loaded.draft.model == settings.draft.model, "settings provider model");
     Check(settings_json.find("api_key") == std::string::npos,
           "settings never serialize API key");

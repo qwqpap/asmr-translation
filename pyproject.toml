@@ -24,6 +24,7 @@ cuda = [
   "nvidia-cudnn-cu12>=9,<10",
 ]
 dev = [
+  "build>=1.2,<2",
   "pytest>=8.3,<9",
   "ruff>=0.9,<1",
 ]

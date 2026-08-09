@@ -42,9 +42,21 @@ Windows 本地日语 ASMR 转写、上下文翻译与同步台词播放器。
 - Whisper 转写缓存与翻译 v2 缓存分离，升级提示词不会重跑昂贵 ASR。
 - GUI 的 API Key 存入 Windows Credential Manager，不进入设置、缓存、日志或命令行。
 - CLI 的外部 Key 只从指定环境变量读取；非交互外发还需 `--allow-external-text`。
-- 不静默切换模型，不自动下载 Python、CUDA、FFmpeg、Ollama 或模型。
+- 不静默切换模型；开发环境不自动下载依赖，MSI 只有在用户勾选并确认后才运行引导下载。
 
 ## 环境与安装
+
+### 普通用户：轻量 MSI
+
+从 GitHub Releases 下载 `asmr-translation-0.3.0-x64.msi`，双击即可按当前用户安装，
+不需要管理员权限。安装包只包含 GUI、项目 wheel、依赖清单和引导程序，不捆绑 Python、
+CUDA、FFmpeg、Ollama 或 Whisper 模型。首次启动会打开依赖向导；只有勾选项目并点击
+“安装所选”后才会联网，Whisper 模型默认不勾选。
+
+详细步骤、镜像规则、隐私边界和卸载行为见 [docs/INSTALL_WINDOWS.md](docs/INSTALL_WINDOWS.md)，
+常见问题见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
+
+### 开发者：手工环境
 
 要求 Windows 10/11、Python 3.12、FFmpeg；本地翻译还需要 Ollama。CUDA 为当前
 `large-v3` 实机配置，CPU 仅适合诊断。
@@ -71,8 +83,9 @@ cmake --build native/build --config Release
 .\native\build\Release\asmr-translation.exe
 ```
 
-也可把音频路径作为 EXE 参数，或拖放到窗口。GUI 会向上寻找项目 `.venv`，并从 PATH
-查找 FFmpeg；路径可在设置页修正。
+也可把音频路径作为 EXE 参数，或拖放到窗口。开发环境 GUI 会向上寻找项目 `.venv`；
+MSI 安装版优先使用 `%LocalAppData%\ASMR Translation\runtime` 下的嵌入式 Python，
+并从 PATH 查找 FFmpeg。所有路径都可在设置页修正，设置和缓存不会写入安装目录。
 
 ## CLI 用法
 
@@ -150,10 +163,16 @@ ctest --test-dir native/build -C Release --output-on-failure
 质量 fixture 的可翻译项为 24/24，四个严重案例全部通过；结构通过仍不代替全音频人工
 听感验收。当前实机证据与尚未完成的视觉门槛见 [docs/VALIDATION.md](docs/VALIDATION.md)。
 
+## 发布与构建
+
+维护者可按 [docs/BUILD_INSTALLER.md](docs/BUILD_INSTALLER.md) 安装 WiX v4 并构建 MSI。
+发布前必须为 Python Embeddable、get-pip.py 和依赖 lock 填入官方 SHA-256；构建脚本会
+拒绝占位哈希。未签名的本地构建可能显示 Windows SmartScreen 警告。
+
 ## 首版边界
 
-不包含波形编辑、日文 ASR 原文修改、自包含安装包、自动模型下载或无提示的外部服务
-回退。EXE 是轻量前端，运行时仍需项目 Python 环境和相应本地工具。
+不包含波形编辑、日文 ASR 原文修改、Ollama 静默安装、无提示的外部服务回退或自动
+下载模型。MSI 是轻量前端；运行时依赖必须由用户在向导中明确选择，或在设置中手动配置。
 
 ## 许可证
 

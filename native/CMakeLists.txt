@@ -11,6 +11,7 @@ set(NATIVE_SOURCES
     src/page_host.cpp
     src/settings.cpp
     src/utf.cpp
+    src/bootstrap_client.cpp
     src/worker_client.cpp
     src/worker_protocol.cpp
 )
@@ -52,6 +53,7 @@ add_executable(native-tests
     src/page_host.cpp
     src/settings.cpp
     src/utf.cpp
+    src/bootstrap_client.cpp
     src/worker_protocol.cpp
 )
 target_include_directories(native-tests PRIVATE include)
