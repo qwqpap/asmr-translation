@@ -20,8 +20,16 @@
 ## Ollama 或翻译失败
 
 确认 Ollama 服务正在运行，设置中的 Base URL（默认 `http://127.0.0.1:11434`）可访问，
-并且模型标签完全匹配。外部 OpenAI-compatible API 的 Key 只保存在 Credential Manager；
-401、429、超时和格式错误会写入日志，不会静默回退到别的模型。
+并且模型标签完全匹配。依赖探测只会报告缺失模型和精确安装命令，不会静默下载；
+手工执行 `ollama pull translategemma:4b` 和（如缺失）
+`ollama pull qwen3.5-9b-abliterated:latest`。外部 OpenAI-compatible API 的 Key
+只保存在 Credential Manager；401、429、超时和格式错误会写入日志，不会静默回退到别的模型。
+
+默认角色是 TranslateGemma 主翻译、Qwen 语境分析/失败兜底；TranslateGemma 使用
+`translategemma` 协议（空 system、`temperature=0`、严格 JSON），并保留成人、粗俗和
+耳语表达。质量模式会先完成全部 Qwen 语境，再卸载 Qwen 才进入主翻译。GTX 1660 Ti
+6GB 不应同时运行 Whisper、Qwen 和 TranslateGemma；遇到 OOM，先确认 ASR 已结束，
+再把批量大小降到 6 或使用平衡模式。
 
 ## FFmpeg 或播放器打不开音频
 

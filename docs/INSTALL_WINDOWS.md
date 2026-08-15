@@ -17,7 +17,12 @@ Python 环境、CUDA、FFmpeg、Ollama 或约 3.1GB Whisper 模型，因此安�
 - Python 3.12 Embeddable 和 ASR Python 依赖默认勾选；可选择 CPU 或 NVIDIA CUDA 12。
 - FFmpeg 是可选项。已有 `ffmpeg.exe` 时直接在设置中指定路径即可。
 - Whisper `large-v3` 模型默认不勾选，模型下载完成后才会写入 ASR 模型路径。
-- Ollama 不由本程序静默安装；请自行安装并在设置中确认服务地址和模型。
+- Ollama 不由本程序静默安装；请自行安装并在设置中确认服务地址和模型。环境探测会
+  分别检查 `translategemma:4b`（主翻译）和
+  `qwen3.5-9b-abliterated:latest`（语境/兜底），缺失时只显示精确的
+  `ollama pull <model>` 命令；模型仍使用 Ollama 当前 C 盘目录。
+- GTX 1660 Ti 6GB 按阶段使用显存：Whisper 结束后才加载 Qwen，语境完成后卸载 Qwen
+  再加载 TranslateGemma；失败批次才重新加载 Qwen，不会三个模型同时常驻。
 
 下载项均来自 manifest 中的固定 URL，并检查大小和 SHA-256。镜像框可以填写一个明确的
 Base URL；程序不会因为失败而自动切换未知镜像。下载使用 `.part` 和 Range 续传，取消

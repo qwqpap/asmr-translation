@@ -73,14 +73,18 @@ enum ControlId : int {
     IdCache,
     IdGlossary,
     IdDraftKind,
+    IdDraftProtocol,
     IdDraftBase,
     IdDraftModel,
     IdDraftKey,
+    IdAnalysisModel,
+    IdFallbackModel,
     IdReviewSame,
     IdReviewKind,
     IdReviewBase,
     IdReviewModel,
     IdReviewKey,
+    IdReviewEnabled,
     IdQuality,
     IdSaveSettings,
     IdDownloadSettingsRoot = 340,
@@ -357,14 +361,18 @@ private:
     HWND cache_{};
     HWND glossary_{};
     HWND draft_kind_{};
+    HWND draft_protocol_{};
     HWND draft_base_{};
     HWND draft_model_{};
     HWND draft_key_{};
+    HWND analysis_model_{};
+    HWND fallback_model_{};
     HWND review_same_{};
     HWND review_kind_{};
     HWND review_base_{};
     HWND review_model_{};
     HWND review_key_{};
+    HWND review_enabled_{};
     HWND quality_{};
     HWND settings_download_root_{};
     HWND download_endpoint_{};
@@ -374,6 +382,7 @@ private:
     HWND save_settings_{};
     HWND setup_open_{};
     std::vector<HWND> setting_labels_;
+    int settings_scroll_ = 0;
 
     HWND setup_window_{};
     HWND setup_intro_{};
@@ -486,6 +495,8 @@ void Application::CreatePages() {
     player_page_ = asmr::CreatePageHost(tab_, instance_);
     download_page_ = asmr::CreatePageHost(tab_, instance_);
     settings_page_ = asmr::CreatePageHost(tab_, instance_);
+    SetWindowLongPtrW(settings_page_, GWL_STYLE,
+                      GetWindowLongPtrW(settings_page_, GWL_STYLE) | WS_VSCROLL);
     CreateTaskPage();
     CreatePlayerPage();
     CreateDownloadPage();
@@ -630,9 +641,12 @@ void Application::CreateSettingsPage() {
     add_row(L"下载代理", download_proxy_, IdDownloadProxy, ES_AUTOHSCROLL);
     add_row(L"连接超时(秒)", download_timeout_, IdDownloadTimeout, ES_AUTOHSCROLL);
     add_row(L"初译提供方", draft_kind_, IdDraftKind, CBS_DROPDOWNLIST);
+    add_row(L"翻译协议", draft_protocol_, IdDraftProtocol, CBS_DROPDOWNLIST);
     add_row(L"初译 Base URL", draft_base_, IdDraftBase, ES_AUTOHSCROLL);
     add_row(L"初译模型", draft_model_, IdDraftModel, ES_AUTOHSCROLL);
     add_row(L"初译 API Key", draft_key_, IdDraftKey, ES_PASSWORD | ES_AUTOHSCROLL);
+    add_row(L"语境分析模型（可选）", analysis_model_, IdAnalysisModel, ES_AUTOHSCROLL);
+    add_row(L"失败兜底模型（可选）", fallback_model_, IdFallbackModel, ES_AUTOHSCROLL);
     review_same_ = CreateControl(L"BUTTON",
                                  L"审校使用与初译相同的提供方",
                                  BS_AUTOCHECKBOX,
@@ -646,8 +660,15 @@ void Application::CreateSettingsPage() {
         ComboBox_AddString(combo, L"Ollama");
         ComboBox_AddString(combo, L"OpenAI 兼容");
     }
+    ComboBox_AddString(draft_protocol_, L"chat-json");
+    ComboBox_AddString(draft_protocol_, L"translategemma");
+    review_enabled_ = CreateControl(L"BUTTON",
+                                    L"启用全量二次审校",
+                                    BS_AUTOCHECKBOX,
+                                    settings_page_,
+                                    IdReviewEnabled);
     quality_ = CreateControl(L"BUTTON",
-                             L"质量模式：语境分析 + 全量二次审校",
+                             L"质量模式：语境分析",
                              BS_AUTOCHECKBOX,
                              settings_page_,
                              IdQuality);
@@ -741,6 +762,9 @@ void Application::Layout() {
                width - scale(20), height - download_list_height - scale(158), TRUE);
 
     int y = scale(18);
+    const int previous_settings_scroll = settings_scroll_;
+    const int content_top = y;
+    const int content_offset = settings_scroll_;
     std::size_t label_index = 0;
     for (const auto control : {python_,
                                asr_model_,
@@ -753,33 +777,61 @@ void Application::Layout() {
                                download_proxy_,
                                download_timeout_,
                                draft_kind_,
-                               draft_base_,
-                               draft_model_,
-                               draft_key_}) {
-        MoveWindow(setting_labels_[label_index++], scale(20), y, scale(140), scale(28), TRUE);
+                               draft_protocol_,
+                                draft_base_,
+                                draft_model_,
+                                draft_key_,
+                                analysis_model_,
+                                fallback_model_}) {
+        MoveWindow(setting_labels_[label_index++],
+                   scale(20),
+                   y - content_offset,
+                   scale(140),
+                   scale(28),
+                   TRUE);
         MoveWindow(control,
                    scale(170),
-                   y,
+                   y - content_offset,
                    width - scale(200),
                    scale(28),
                    TRUE);
         y += scale(32);
     }
-    MoveWindow(review_same_, scale(170), y, scale(300), scale(28), TRUE);
+    MoveWindow(review_same_, scale(170), y - content_offset, scale(300), scale(28), TRUE);
     y += scale(32);
     for (const auto control : {review_kind_, review_base_, review_model_, review_key_}) {
-        MoveWindow(setting_labels_[label_index++], scale(20), y, scale(140), scale(28), TRUE);
+        MoveWindow(setting_labels_[label_index++],
+                   scale(20),
+                   y - content_offset,
+                   scale(140),
+                   scale(28),
+                   TRUE);
         MoveWindow(control,
                    scale(170),
-                   y,
+                   y - content_offset,
                    width - scale(200),
                    scale(28),
                    TRUE);
         y += scale(32);
     }
-    MoveWindow(quality_, scale(170), y, scale(320), scale(28), TRUE);
-    MoveWindow(save_settings_, width - scale(130), y, scale(110), scale(30), TRUE);
-    MoveWindow(setup_open_, width - scale(250), y, scale(110), scale(30), TRUE);
+    MoveWindow(review_enabled_, scale(170), y - content_offset, scale(260), scale(28), TRUE);
+    y += scale(32);
+    MoveWindow(quality_, scale(170), y - content_offset, scale(320), scale(28), TRUE);
+    MoveWindow(save_settings_, width - scale(130), y - content_offset, scale(110), scale(30), TRUE);
+    MoveWindow(setup_open_, width - scale(250), y - content_offset, scale(110), scale(30), TRUE);
+    const int content_height = y + scale(42) - content_top;
+    const int max_scroll = std::max(0, content_height - height);
+    settings_scroll_ = std::clamp(settings_scroll_, 0, max_scroll);
+    SCROLLINFO scroll_info{sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS};
+    scroll_info.nMin = 0;
+    scroll_info.nMax = content_height;
+    scroll_info.nPage = static_cast<UINT>(height);
+    scroll_info.nPos = settings_scroll_;
+    SetScrollInfo(settings_page_, SB_VERT, &scroll_info, TRUE);
+    if (settings_scroll_ != previous_settings_scroll) {
+        Layout();
+        return;
+    }
 }
 
 void Application::SelectPage() {
@@ -820,14 +872,18 @@ void Application::LoadSettingsIntoControls() {
     SetText(download_timeout_, std::to_wstring(settings_.download_connect_timeout));
     SetText(download_root_, settings_.download_root);
     ComboBox_SetCurSel(draft_kind_, settings_.draft.kind == L"openai" ? 1 : 0);
+    ComboBox_SetCurSel(draft_protocol_, settings_.draft.protocol == L"translategemma" ? 1 : 0);
     SetText(draft_base_, settings_.draft.base_url);
     SetText(draft_model_, settings_.draft.model);
     SetText(draft_key_, asmr::ReadCredential(kDraftCredential));
+    SetText(analysis_model_, settings_.analysis_enabled ? settings_.analysis.model : L"");
+    SetText(fallback_model_, settings_.fallback_enabled ? settings_.fallback.model : L"");
     Button_SetCheck(review_same_, settings_.review_same_as_draft ? BST_CHECKED : BST_UNCHECKED);
     ComboBox_SetCurSel(review_kind_, settings_.review.kind == L"openai" ? 1 : 0);
     SetText(review_base_, settings_.review.base_url);
     SetText(review_model_, settings_.review.model);
     SetText(review_key_, asmr::ReadCredential(kReviewCredential));
+    Button_SetCheck(review_enabled_, settings_.review_enabled ? BST_CHECKED : BST_UNCHECKED);
     Button_SetCheck(quality_, settings_.quality_mode ? BST_CHECKED : BST_UNCHECKED);
     UpdateSettingsEnabled();
 }
@@ -856,10 +912,20 @@ void Application::ReadSettingsFromControls() {
     settings_.draft.kind = ComboBox_GetCurSel(draft_kind_) == 1 ? L"openai" : L"ollama";
     settings_.draft.base_url = TextOf(draft_base_);
     settings_.draft.model = TextOf(draft_model_);
+    settings_.draft.protocol = ComboBox_GetCurSel(draft_protocol_) == 1
+                                   ? L"translategemma"
+                                   : L"chat-json";
     settings_.review_same_as_draft = Button_GetCheck(review_same_) == BST_CHECKED;
+    settings_.analysis.model = TextOf(analysis_model_);
+    settings_.analysis.protocol = L"chat-json";
+    settings_.analysis_enabled = !settings_.analysis.model.empty();
+    settings_.fallback.model = TextOf(fallback_model_);
+    settings_.fallback.protocol = L"chat-json";
+    settings_.fallback_enabled = !settings_.fallback.model.empty();
     settings_.review.kind = ComboBox_GetCurSel(review_kind_) == 1 ? L"openai" : L"ollama";
     settings_.review.base_url = TextOf(review_base_);
     settings_.review.model = TextOf(review_model_);
+    settings_.review_enabled = Button_GetCheck(review_enabled_) == BST_CHECKED;
     settings_.quality_mode = Button_GetCheck(quality_) == BST_CHECKED;
 }
 
@@ -868,6 +934,10 @@ void Application::UpdateSettingsEnabled() {
     const bool same_review = Button_GetCheck(review_same_) == BST_CHECKED;
     const bool review_openai = ComboBox_GetCurSel(review_kind_) == 1;
     EnableWindow(draft_key_, draft_openai);
+    EnableWindow(draft_protocol_, !draft_openai);
+    if (draft_openai) {
+        ComboBox_SetCurSel(draft_protocol_, 0);
+    }
     for (const auto control : {review_kind_, review_base_, review_model_}) {
         EnableWindow(control, !same_review);
     }
@@ -1289,6 +1359,7 @@ JsonObject Application::ProviderJson(const asmr::ProviderSettings& provider,
     PutString(object, L"base_url", provider.base_url);
     PutString(object, L"model", provider.model);
     PutBoolean(object, L"strict_schema", provider.strict_schema);
+    PutString(object, L"protocol", provider.protocol);
     if (provider.kind == L"openai") {
         PutString(object, L"api_key", credential);
     }
@@ -1302,7 +1373,7 @@ JsonObject Application::ConfigJson() const {
     PutString(config, L"ffmpeg_path", settings_.ffmpeg_path);
     PutString(config, L"glossary_path", settings_.glossary_path);
     PutString(config, L"quality_mode", settings_.quality_mode ? L"quality" : L"balanced");
-    PutBoolean(config, L"review_enabled", true);
+    PutBoolean(config, L"review_enabled", settings_.review_enabled);
     PutBoolean(config, L"overwrite", Button_GetCheck(overwrite_) == BST_CHECKED);
     PutNumber(config, L"batch_size", 12);
     PutNumber(config, L"context_before", 8);
@@ -1317,6 +1388,12 @@ JsonObject Application::ConfigJson() const {
         config.SetNamedValue(
             L"review_provider",
             ProviderJson(settings_.review, asmr::ReadCredential(kReviewCredential)));
+    }
+    if (settings_.analysis_enabled && !settings_.analysis.model.empty()) {
+        config.SetNamedValue(L"analysis_provider", ProviderJson(settings_.analysis, L""));
+    }
+    if (settings_.fallback_enabled && !settings_.fallback.model.empty()) {
+        config.SetNamedValue(L"fallback_provider", ProviderJson(settings_.fallback, L""));
     }
     return config;
 }
@@ -2023,6 +2100,39 @@ LRESULT Application::HandleMessage(const UINT message, const WPARAM wparam, cons
             } else if (reinterpret_cast<HWND>(lparam) == volume_) {
                 player_.SetVolume(
                     static_cast<double>(SendMessageW(volume_, TBM_GETPOS, 0, 0)) / 100.0);
+            }
+            return 0;
+        case WM_VSCROLL:
+            if (lparam == 0 && TabCtrl_GetCurSel(tab_) == 3) {
+                SCROLLINFO scroll_info{sizeof(SCROLLINFO), SIF_ALL};
+                GetScrollInfo(settings_page_, SB_VERT, &scroll_info);
+                int position = scroll_info.nPos;
+                switch (LOWORD(wparam)) {
+                    case SB_LINEUP:
+                        position -= MulDiv(32, static_cast<int>(dpi_), 96);
+                        break;
+                    case SB_LINEDOWN:
+                        position += MulDiv(32, static_cast<int>(dpi_), 96);
+                        break;
+                    case SB_PAGEUP:
+                        position -= static_cast<int>(scroll_info.nPage);
+                        break;
+                    case SB_PAGEDOWN:
+                        position += static_cast<int>(scroll_info.nPage);
+                        break;
+                    case SB_THUMBTRACK:
+                    case SB_THUMBPOSITION:
+                        position = scroll_info.nTrackPos;
+                        break;
+                    default:
+                        break;
+                }
+                const int maximum = std::max(
+                    0,
+                    scroll_info.nMax - static_cast<int>(scroll_info.nPage) + 1);
+                settings_scroll_ = std::clamp(position, 0, maximum);
+                SetScrollPos(settings_page_, SB_VERT, settings_scroll_, TRUE);
+                Layout();
             }
             return 0;
         case WM_TIMER:

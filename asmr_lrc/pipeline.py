@@ -20,11 +20,11 @@ from .cache import (
 )
 from .config import AppConfig
 from .control import CancelledError, CancelToken, EventCallback, emit
-from .errors import AsmrLrcError, CacheError
+from .errors import AsmrLrcError, CacheError, TranslationError
 from .filters import filter_transcript
 from .lrc import render_lrc, write_lrc_atomic
 from .models import FilteredTranscript, SourceIdentity, Transcript, Translation
-from .providers import TranslationProvider, create_provider
+from .providers import ProviderConfig, TranslationProvider, create_provider
 from .reporting import BatchReport
 from .scanner import plan_scan
 from .translation_context import (
@@ -155,6 +155,8 @@ def _load_context_memory(
             return None
         cached_source = SourceIdentity.from_dict(data["source"])
         if not same_source(cached_source, source) or data.get("profile_id") != profile_id:
+            stale = quarantine_stale(path)
+            _log(log_path, f"context cache profile stale: {stale.name}")
             return None
         return ContextMemory.from_dict(data["memory"])
     except (CacheError, KeyError, TypeError, ValueError) as exc:
@@ -197,11 +199,145 @@ def _provider_pair(config: AppConfig) -> tuple[TranslationProvider, TranslationP
     draft = create_provider(config.draft_provider)
     review: TranslationProvider | None = None
     if config.review_enabled and config.review_provider is not None:
-        if config.review_provider is config.draft_provider:
+        if _same_provider_config(config.review_provider, config.draft_provider):
             review = draft
         else:
             review = create_provider(config.review_provider)
     return draft, review
+
+
+def _same_provider_config(first, second) -> bool:
+    if first is second:
+        return True
+    if first is None or second is None:
+        return False
+    return (
+        first.kind,
+        first.base_url.rstrip("/"),
+        first.model,
+        first.api_key,
+        first.strict_schema,
+        first.timeout_seconds,
+        first.keep_alive,
+        first.protocol,
+    ) == (
+        second.kind,
+        second.base_url.rstrip("/"),
+        second.model,
+        second.api_key,
+        second.strict_schema,
+        second.timeout_seconds,
+        second.keep_alive,
+        second.protocol,
+    )
+
+
+def _analysis_and_fallback_providers(
+    config: AppConfig,
+    draft: TranslationProvider,
+    review: TranslationProvider | None,
+) -> tuple[TranslationProvider | None, TranslationProvider | None]:
+    analysis: TranslationProvider | None = None
+    fallback: TranslationProvider | None = None
+    if config.analysis_provider is not None:
+        if _same_provider_config(config.analysis_provider, config.draft_provider):
+            analysis = draft
+        elif _same_provider_config(config.analysis_provider, config.review_provider):
+            analysis = review
+        else:
+            analysis = create_provider(config.analysis_provider)
+    if config.fallback_provider is not None:
+        if _same_provider_config(config.fallback_provider, config.draft_provider):
+            fallback = draft
+        elif _same_provider_config(config.fallback_provider, config.analysis_provider):
+            fallback = analysis
+        elif _same_provider_config(config.fallback_provider, config.review_provider):
+            fallback = review
+        else:
+            fallback = create_provider(config.fallback_provider)
+    return analysis, fallback
+
+
+def _configured_providers(config: AppConfig) -> tuple[ProviderConfig, ...]:
+    values = (
+        config.draft_provider,
+        config.review_provider,
+        config.analysis_provider,
+        config.fallback_provider,
+    )
+    result = []
+    for value in values:
+        if value is not None and not any(
+            _same_provider_config(value, existing) for existing in result
+        ):
+            result.append(value)
+    return tuple(result)
+
+
+def _translate_with_fallback(
+    segments: tuple,
+    indices: tuple[int, ...],
+    *,
+    provider: TranslationProvider,
+    fallback: TranslationProvider | None,
+    memory: ContextMemory,
+    context_before: int,
+    context_after: int,
+    retries: int,
+    drafts: dict[str, str] | None = None,
+    max_prompt_characters: int = 24_000,
+    unloaded_provider_ids: set[int] | None = None,
+) -> tuple[tuple, dict[str, object]]:
+    # A provider may have been explicitly unloaded by an earlier fallback
+    # batch.  Calling ``generate`` below can load it again, so clear the
+    # bookkeeping mark before every new primary use; the finalizer must not
+    # mistake a reloaded model for one that is still cold.
+    if unloaded_provider_ids is not None:
+        unloaded_provider_ids.discard(id(provider))
+    try:
+        return translate_contextual_batch(
+            segments,
+            indices,
+            provider=provider,
+            memory=memory,
+            context_before=context_before,
+            context_after=context_after,
+            retries=retries,
+            drafts=drafts,
+            max_prompt_characters=max_prompt_characters,
+        )
+    except TranslationError as primary_error:
+        if fallback is None or fallback is provider:
+            raise
+        # Ollama will otherwise keep both models resident while switching
+        # roles. Explicitly unload before loading the fallback model.
+        provider.unload()
+        if unloaded_provider_ids is not None:
+            unloaded_provider_ids.add(id(provider))
+        fallback.check()
+        if unloaded_provider_ids is not None:
+            unloaded_provider_ids.discard(id(fallback))
+        try:
+            items, metrics = translate_contextual_batch(
+                segments,
+                indices,
+                provider=fallback,
+                memory=memory,
+                context_before=context_before,
+                context_after=context_after,
+                retries=retries,
+                drafts=drafts,
+                max_prompt_characters=max_prompt_characters,
+            )
+        finally:
+            fallback.unload()
+            if unloaded_provider_ids is not None:
+                unloaded_provider_ids.add(id(fallback))
+        return items, {
+            **metrics,
+            "fallback": True,
+            "primary_error": str(primary_error),
+        }
 
 
 def _estimate_external_characters(
@@ -212,7 +348,10 @@ def _estimate_external_characters(
     total = 0
     for _source, _directory, _transcript, filtered in contexts.values():
         segments = filtered.accepted
-        if config.quality_mode == "quality" and config.draft_provider.kind == "openai":
+        if config.quality_mode == "quality" and any(
+            provider is not None and provider.kind == "openai"
+            for provider in (config.draft_provider, config.analysis_provider)
+        ):
             total += sum(len(segment.text) for segment in segments)
         for offset in range(0, len(segments), config.translation_batch_size):
             start = max(0, offset - config.context_before)
@@ -230,6 +369,11 @@ def _estimate_external_characters(
                 and config.review_provider.kind == "openai"
             ):
                 total += window_characters * 2
+            if (
+                config.fallback_provider is not None
+                and config.fallback_provider.kind == "openai"
+            ):
+                total += window_characters
     return total
 
 
@@ -345,11 +489,8 @@ def run_pipeline(
                             ollama_url=(
                                 config.ollama_url
                                 if any(
-                                    provider is not None and provider.kind == "ollama"
-                                    for provider in (
-                                        config.draft_provider,
-                                        config.review_provider,
-                                    )
+                                    provider.kind == "ollama"
+                                    for provider in _configured_providers(config)
                                 )
                                 else None
                             ),
@@ -397,9 +538,20 @@ def run_pipeline(
 
     # Phase 2: Whisper processes have exited; only now may translation models load.
     draft_provider, review_provider = _provider_pair(config)
+    analysis_provider, fallback_provider = _analysis_and_fallback_providers(
+        config, draft_provider, review_provider
+    )
+    analysis_loaded = False
     providers_checked = False
+    provider_check_error: AsmrLrcError | None = None
     external_authorized = False
+    context_memories: dict[Path, ContextMemory] = {}
+    context_failures: dict[Path, str] = {}
+    unloaded_provider_ids: set[int] = set()
     try:
+        # Phase 3: build every context memory before loading the primary
+        # translation model.  This is deliberately a separate pass so a
+        # 6-GiB GPU never keeps Qwen resident while TranslateGemma is warm.
         for index, item in enumerate(work, 1):
             token.raise_if_cancelled()
             context = contexts.get(item.audio)
@@ -408,6 +560,143 @@ def run_pipeline(
             source, directory, _transcript, filtered = context
             translation_path = directory / "translation.zh-CN.json"
             context_path = directory / "translation.context.json"
+            log_path = directory / "process.log"
+            try:
+                cached_translation = _load_translation_or_none(translation_path, log_path)
+                if cached_translation is not None:
+                    if _translation_valid(cached_translation, filtered, config):
+                        continue
+                    stale = quarantine_stale(translation_path)
+                    _log(log_path, f"translation cache profile stale: {stale.name}")
+                if provider_check_error is not None:
+                    raise provider_check_error
+                if not providers_checked:
+                    checked_providers: list[TranslationProvider] = []
+                    for provider in (
+                        draft_provider,
+                        review_provider,
+                        analysis_provider,
+                        fallback_provider,
+                    ):
+                        if provider is not None and not any(
+                            provider is checked for checked in checked_providers
+                        ):
+                            provider.check()
+                            checked_providers.append(provider)
+                    providers_checked = True
+
+                uses_external = any(
+                    provider is not None and provider.config.kind == "openai"
+                    for provider in (
+                        draft_provider,
+                        review_provider,
+                        analysis_provider,
+                        fallback_provider,
+                    )
+                )
+                if uses_external and not external_authorized:
+                    estimated = _estimate_external_characters(contexts, config)
+                    emit(
+                        event_callback,
+                        "external_consent_required",
+                        estimated_characters=estimated,
+                        audio_uploaded=False,
+                    )
+                    if external_consent_callback is None or not external_consent_callback(
+                        estimated
+                    ):
+                        raise AsmrLrcError("用户未授权向外部 API 发送转写文本")
+                    external_authorized = True
+
+                profile_id = config.translation_profile_id()
+                memory = _load_context_memory(
+                    context_path,
+                    source=source,
+                    profile_id=profile_id,
+                    log_path=log_path,
+                )
+                if memory is None:
+                    if config.quality_mode == "quality" and analysis_provider is not None:
+                        emit(
+                            event_callback,
+                            "phase",
+                            phase="context",
+                            current=index,
+                            total=len(work),
+                            audio=str(item.audio),
+                        )
+                        _message(
+                            f"语境分析: {item.audio.name}",
+                            callback=event_callback,
+                            quiet=quiet,
+                        )
+                        memory, context_metrics = analyze_context(
+                            filtered.accepted,
+                            provider=analysis_provider,
+                            retries=config.translation_retries,
+                            pinned_terms=config.pinned_glossary,
+                            max_characters=min(
+                                12_000,
+                                config.translation_prompt_character_limit,
+                            ),
+                        )
+                        analysis_loaded = True
+                    else:
+                        memory = baseline_context_memory(
+                            filtered.accepted,
+                            config.pinned_glossary,
+                        )
+                        context_metrics = ()
+                    atomic_write_json(
+                        context_path,
+                        {
+                            "schema_version": CONTEXT_SCHEMA_VERSION,
+                            "source": source.to_dict(),
+                            "profile_id": profile_id,
+                            "created_at": datetime.now(UTC).isoformat(),
+                            "memory": memory.to_dict(),
+                            "batches": list(context_metrics),
+                        },
+                    )
+                else:
+                    report.cache_hits += 1
+                context_memories[item.audio] = memory
+            except CancelledError:
+                raise
+            except (OSError, ValueError, json.JSONDecodeError, AsmrLrcError) as exc:
+                if not providers_checked and provider_check_error is None:
+                    provider_check_error = exc if isinstance(exc, AsmrLrcError) else None
+                context_failures[item.audio] = str(exc)
+                report.add_failure(str(item.audio), str(exc))
+                _log(log_path, f"context preparation failure: {exc}")
+                _message(
+                    f"失败: {item.audio}: {exc}",
+                    callback=event_callback,
+                    quiet=quiet,
+                    level="error",
+                    audio=str(item.audio),
+                )
+
+        if (
+            analysis_loaded
+            and analysis_provider is not None
+            and analysis_provider is not draft_provider
+        ):
+            analysis_provider.unload()
+            unloaded_provider_ids.add(id(analysis_provider))
+            analysis_loaded = False
+
+        # Phase 4: TranslateGemma handles all batches after context analysis
+        # has completed and Qwen has been explicitly unloaded.
+        for index, item in enumerate(work, 1):
+            token.raise_if_cancelled()
+            context = contexts.get(item.audio)
+            if context is None:
+                continue
+            if item.audio in context_failures:
+                continue
+            source, directory, _transcript, filtered = context
+            translation_path = directory / "translation.zh-CN.json"
             draft_path = directory / "translation.zh-CN.draft.json"
             draft_partial_path = directory / "translation.zh-CN.partial.json"
             review_partial_path = directory / "translation.zh-CN.review.partial.json"
@@ -427,87 +716,18 @@ def run_pipeline(
             )
             try:
                 translation = _load_translation_or_none(translation_path, log_path)
-                if translation is not None and _translation_valid(translation, filtered, config):
-                    report.cache_hits += 1
-                else:
-                    translation = None
-                if translation is None:
-                    uses_external = any(
-                        provider is not None and provider.kind == "openai"
-                        for provider in (config.draft_provider, config.review_provider)
-                    )
-                    if uses_external and not external_authorized:
-                        estimated = _estimate_external_characters(contexts, config)
-                        emit(
-                            event_callback,
-                            "external_consent_required",
-                            estimated_characters=estimated,
-                            audio_uploaded=False,
-                        )
-                        if external_consent_callback is None or not external_consent_callback(
-                            estimated
-                        ):
-                            raise AsmrLrcError("用户未授权向外部 API 发送转写文本")
-                        external_authorized = True
-                    if not providers_checked:
-                        draft_provider.check()
-                        if review_provider is not None and review_provider is not draft_provider:
-                            review_provider.check()
-                        providers_checked = True
-
-                    profile_id = config.translation_profile_id()
-                    expected_ids = tuple(segment.id for segment in filtered.accepted)
-                    memory = _load_context_memory(
-                        context_path,
-                        source=source,
-                        profile_id=profile_id,
-                        log_path=log_path,
-                    )
-                    if memory is None:
-                        if config.quality_mode == "quality":
-                            token.raise_if_cancelled()
-                            emit(
-                                event_callback,
-                                "phase",
-                                phase="context",
-                                current=index,
-                                total=len(work),
-                                audio=str(item.audio),
-                            )
-                            _message(
-                                f"语境分析: {item.audio.name}",
-                                callback=event_callback,
-                                quiet=quiet,
-                            )
-                            memory, context_metrics = analyze_context(
-                                filtered.accepted,
-                                provider=draft_provider,
-                                retries=config.translation_retries,
-                                pinned_terms=config.pinned_glossary,
-                                max_characters=min(
-                                    12_000,
-                                    config.translation_prompt_character_limit,
-                                ),
-                            )
-                        else:
-                            memory = baseline_context_memory(
-                                filtered.accepted,
-                                config.pinned_glossary,
-                            )
-                            context_metrics = ()
-                        atomic_write_json(
-                            context_path,
-                            {
-                                "schema_version": CONTEXT_SCHEMA_VERSION,
-                                "source": source.to_dict(),
-                                "profile_id": profile_id,
-                                "created_at": datetime.now(UTC).isoformat(),
-                                "memory": memory.to_dict(),
-                                "batches": list(context_metrics),
-                            },
-                        )
-                    else:
+                if translation is not None:
+                    if _translation_valid(translation, filtered, config):
                         report.cache_hits += 1
+                    else:
+                        stale = quarantine_stale(translation_path)
+                        _log(log_path, f"translation cache profile stale: {stale.name}")
+                        translation = None
+                if translation is None:
+                    expected_ids = tuple(segment.id for segment in filtered.accepted)
+                    memory = context_memories.get(item.audio)
+                    if memory is None:
+                        raise AsmrLrcError("翻译缺少已完成的语境分析缓存")
 
                     draft = _load_translation_or_none(draft_path, log_path)
                     if draft is not None and not (
@@ -516,12 +736,16 @@ def run_pipeline(
                         )
                         and tuple(part.id for part in draft.items) == expected_ids
                     ):
+                        stale = quarantine_stale(draft_path)
+                        _log(log_path, f"draft cache profile stale: {stale.name}")
                         draft = None
                     if draft is None:
                         partial = _load_translation_or_none(draft_partial_path, log_path)
                         if partial is not None and not _translation_partial_valid(
                             partial, filtered, config, stage="draft"
                         ):
+                            stale = quarantine_stale(draft_partial_path)
+                            _log(log_path, f"draft partial profile stale: {stale.name}")
                             partial = None
                         item_by_id = (
                             {} if partial is None else {part.id: part for part in partial.items}
@@ -570,15 +794,17 @@ def run_pipeline(
                             callback=event_callback,
                             quiet=quiet,
                         )
-                        new_items, batch_metrics = translate_contextual_batch(
+                        new_items, batch_metrics = _translate_with_fallback(
                             filtered.accepted,
                             indices,
                             provider=draft_provider,
+                            fallback=fallback_provider,
                             memory=memory,
                             context_before=config.context_before,
                             context_after=config.context_after,
                             retries=config.translation_retries,
                             max_prompt_characters=config.translation_prompt_character_limit,
+                            unloaded_provider_ids=unloaded_provider_ids,
                         )
                         item_by_id.update({part.id: part for part in new_items})
                         batches.append(batch_metrics)
@@ -617,12 +843,19 @@ def run_pipeline(
                     final_items = draft.items
                     final_batches = list(draft.batches)
                     if do_review:
+                        if review_provider is not draft_provider:
+                            draft_provider.unload()
+                            unloaded_provider_ids.add(id(draft_provider))
+                        if review_provider is not None:
+                            unloaded_provider_ids.discard(id(review_provider))
                         review_partial = _load_translation_or_none(
                             review_partial_path, log_path
                         )
                         if review_partial is not None and not _translation_partial_valid(
                             review_partial, filtered, config, stage="review"
                         ):
+                            stale = quarantine_stale(review_partial_path)
+                            _log(log_path, f"review partial profile stale: {stale.name}")
                             review_partial = None
                         reviewed_by_id = (
                             {}
@@ -664,6 +897,7 @@ def run_pipeline(
                                 callback=event_callback,
                                 quiet=quiet,
                             )
+                            unloaded_provider_ids.discard(id(review_provider))
                             reviewed, batch_metrics = translate_contextual_batch(
                                 filtered.accepted,
                                 indices,
@@ -732,9 +966,12 @@ def run_pipeline(
     finally:
         if release_ollama and contexts:
             providers = [draft_provider]
-            if review_provider is not None and review_provider is not draft_provider:
-                providers.append(review_provider)
+            for provider in (review_provider, analysis_provider, fallback_provider):
+                if provider is not None and provider not in providers:
+                    providers.append(provider)
             for provider in providers:
+                if id(provider) in unloaded_provider_ids:
+                    continue
                 try:
                     provider.unload()
                 except AsmrLrcError as exc:

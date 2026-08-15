@@ -170,6 +170,7 @@ int wmain() {
     settings.draft.kind = L"openai";
     settings.draft.base_url = L"https://example.test/v1";
     settings.draft.model = L"draft-model";
+    settings.draft.protocol = L"chat-json";
     settings.review_same_as_draft = false;
     const auto settings_json = asmr::SerializeSettingsUtf8(settings);
     const auto loaded = asmr::ParseSettingsUtf8(settings_json);
@@ -187,6 +188,10 @@ int wmain() {
               L"python-3.12-embed-amd64\\python.exe"),
           "recognize embedded Python path");
     Check(loaded.draft.model == settings.draft.model, "settings provider model");
+    Check(loaded.draft.protocol == settings.draft.protocol, "settings provider protocol");
+    const auto legacy = asmr::ParseSettingsUtf8(
+        R"({"draft":{"kind":"ollama","base_url":"http://local","model":"qwen3.5-9b-abliterated:latest"}})");
+    Check(legacy.draft.protocol == L"chat-json", "legacy settings infer chat-json protocol");
     Check(settings_json.find("api_key") == std::string::npos,
           "settings never serialize API key");
 

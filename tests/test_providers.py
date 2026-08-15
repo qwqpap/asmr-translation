@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from asmr_lrc.errors import TranslationError
-from asmr_lrc.providers import OpenAICompatibleProvider, ProviderConfig
+from asmr_lrc.providers import OllamaProvider, OpenAICompatibleProvider, ProviderConfig
 
 
 class ApiHandler(BaseHTTPRequestHandler):
@@ -54,6 +54,34 @@ def response_payload(content: str) -> dict:
         "choices": [{"message": {"content": content}}],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5},
     }
+
+
+def test_provider_infers_translategemma_protocol_from_model() -> None:
+    config = ProviderConfig("ollama", "http://127.0.0.1:11434", "translategemma:4b")
+
+    assert config.protocol == "translategemma"
+
+
+def test_translategemma_request_uses_empty_system_and_zero_temperature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def fake_request(base_url: str, endpoint: str, *, payload: dict, timeout: float) -> dict:
+        observed.update({"base_url": base_url, "endpoint": endpoint, "payload": payload})
+        return {"response": '{"translations":{},"uncertain_ids":[]}', "eval_count": 3}
+
+    monkeypatch.setattr("asmr_lrc.providers.ollama_request", fake_request)
+    provider = OllamaProvider(
+        ProviderConfig("ollama", "http://local", "translategemma:4b")
+    )
+    provider.generate(system="must not be sent", prompt="translate", schema={"type": "object"})
+
+    payload = observed["payload"]
+    assert isinstance(payload, dict)
+    assert payload["system"] == ""
+    assert payload["options"] == {"temperature": 0, "seed": 0}
+    assert payload["format"] == {"type": "object"}
 
 
 def test_openai_provider_uses_strict_schema_and_bearer_key(api_server: str) -> None:

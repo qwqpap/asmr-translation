@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from .cache import atomic_write_json, cache_directory, load_validated, source_identity
-from .config import AppConfig
+from .config import (
+    DEFAULT_ANALYSIS_MODEL,
+    DEFAULT_TRANSLATION_MODEL,
+    AppConfig,
+    protocol_for_model,
+)
 from .control import CancelledError, CancelToken
 from .downloader import (
     DownloadConfig,
@@ -97,24 +102,49 @@ def _external_consent(estimated_characters: int) -> bool:
 def _provider(data: dict[str, Any], *, fallback: ProviderConfig | None = None) -> ProviderConfig:
     if not data and fallback is not None:
         return fallback
+    model = str(data.get("model", DEFAULT_TRANSLATION_MODEL))
+    raw_protocol = data.get("protocol")
     return ProviderConfig(
         kind=str(data.get("kind", "ollama")),
         base_url=str(data.get("base_url", "http://127.0.0.1:11434")),
-        model=str(data.get("model", "qwen3.5-9b-abliterated:latest")),
+        model=model,
         api_key=(None if data.get("api_key") is None else str(data["api_key"])),
         strict_schema=bool(data.get("strict_schema", True)),
         timeout_seconds=float(data.get("timeout_seconds", 600)),
         keep_alive=str(data.get("keep_alive", "5m")),
+        protocol=(str(raw_protocol) if raw_protocol else protocol_for_model(model)),
     )
 
 
 def _config(data: dict[str, Any]) -> AppConfig:
     draft = _provider(dict(data.get("draft_provider", {})))
+    analysis_data = data.get("analysis_provider")
+    analysis = None
+    if isinstance(analysis_data, dict):
+        analysis = _provider(analysis_data)
+    elif analysis_data == "same":
+        analysis = draft
+    elif draft.protocol == "translategemma":
+        analysis = ProviderConfig(
+            "ollama",
+            draft.base_url,
+            DEFAULT_ANALYSIS_MODEL,
+            keep_alive="5m",
+            protocol="chat-json",
+        )
+    fallback_data = data.get("fallback_provider")
+    fallback = None
+    if isinstance(fallback_data, dict):
+        fallback = _provider(fallback_data)
+    elif fallback_data == "same" or analysis is not None:
+        fallback = analysis
     review_data = data.get("review_provider")
     review = draft if review_data == "same" else None
     if isinstance(review_data, dict):
         review = _provider(review_data, fallback=draft)
-    review_enabled = bool(data.get("review_enabled", True))
+    review_enabled = bool(
+        data.get("review_enabled", draft.protocol != "translategemma")
+    )
     glossary_path = str(data.get("glossary_path", "")).strip()
     return AppConfig(
         cache_root=Path(str(data.get("cache_root", Path.cwd() / ".cache"))).resolve(),
@@ -140,6 +170,8 @@ def _config(data: dict[str, Any]) -> AppConfig:
         review_enabled=review_enabled,
         draft_provider=draft,
         review_provider=review if review_enabled else None,
+        analysis_provider=analysis,
+        fallback_provider=fallback,
         pinned_glossary=(
             ()
             if not glossary_path
@@ -177,8 +209,9 @@ def _command_probe(request: dict[str, Any]) -> None:
     config = _config(dict(request.get("config", {})))
     assert config.draft_provider is not None
     providers = [config.draft_provider]
-    if config.review_provider is not None and config.review_provider is not config.draft_provider:
-        providers.append(config.review_provider)
+    for provider in (config.review_provider, config.analysis_provider, config.fallback_provider):
+        if provider is not None and provider not in providers:
+            providers.append(provider)
     ollama_provider = next(
         (provider for provider in providers if provider.kind == "ollama"), None
     )
@@ -192,17 +225,22 @@ def _command_probe(request: dict[str, Any]) -> None:
         try:
             create_provider(provider_config).check()
             provider_checks.append(
-                {"kind": provider_config.kind, "model": provider_config.model, "ok": True}
-            )
-        except Exception as exc:
-            provider_checks.append(
                 {
                     "kind": provider_config.kind,
                     "model": provider_config.model,
-                    "ok": False,
-                    "detail": str(exc),
+                    "ok": True,
                 }
             )
+        except Exception as exc:
+            item = {
+                "kind": provider_config.kind,
+                "model": provider_config.model,
+                "ok": False,
+                "detail": str(exc),
+            }
+            if provider_config.kind == "ollama" and "模型未安装" in str(exc):
+                item["install_command"] = f"ollama pull {provider_config.model}"
+            provider_checks.append(item)
     result["provider_checks"] = provider_checks
     result["ok"] = bool(result["ok"]) and all(item["ok"] for item in provider_checks)
     _write("probe_result", result=result)

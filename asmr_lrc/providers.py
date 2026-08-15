@@ -9,6 +9,8 @@ from typing import Any, Protocol
 from .environment import ollama_models, ollama_request
 from .errors import TranslationError
 
+PROVIDER_PROTOCOLS = frozenset({"chat-json", "translategemma"})
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderConfig:
@@ -19,6 +21,7 @@ class ProviderConfig:
     strict_schema: bool = True
     timeout_seconds: float = 600
     keep_alive: str = "5m"
+    protocol: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in {"ollama", "openai"}:
@@ -27,6 +30,18 @@ class ProviderConfig:
             raise ValueError("翻译提供方 base_url 不能为空")
         if not self.model.strip():
             raise ValueError("翻译提供方 model 不能为空")
+        protocol = self.protocol
+        if protocol is None:
+            protocol = (
+                "translategemma"
+                if self.model.casefold().split(":", 1)[0] == "translategemma"
+                else "chat-json"
+            )
+            object.__setattr__(self, "protocol", protocol)
+        if protocol not in PROVIDER_PROTOCOLS:
+            raise ValueError(f"不支持的翻译协议: {protocol}")
+        if protocol == "translategemma" and self.kind != "ollama":
+            raise ValueError("translategemma 协议仅支持 Ollama")
 
     def cache_identity(self) -> dict[str, object]:
         return {
@@ -34,6 +49,7 @@ class ProviderConfig:
             "base_url": self.base_url.rstrip("/"),
             "model": self.model,
             "strict_schema": self.strict_schema,
+            "protocol": self.protocol,
         }
 
 
@@ -93,7 +109,10 @@ class OllamaProvider:
             "/api/generate",
             payload={
                 "model": self.config.model,
-                "system": system,
+                # TranslateGemma is trained for a single user message.  The
+                # adapter renders its complete prompt in ``prompt`` and must
+                # not receive the generic chat system message.
+                "system": "" if self.config.protocol == "translategemma" else system,
                 "prompt": prompt,
                 "stream": False,
                 "think": False,

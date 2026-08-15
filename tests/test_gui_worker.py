@@ -216,3 +216,40 @@ def test_worker_probe_external_only_does_not_require_ollama(
     assert observed["ollama_model"] is None
     assert observed["ffmpeg_path"] == "C:/tools/ffmpeg.exe"
     assert "probe-secret" not in output
+
+
+def test_worker_probe_reports_exact_ollama_pull_command(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    class MissingProvider:
+        def check(self) -> None:
+            raise RuntimeError("Ollama 模型未安装: translategemma:4b")
+
+    monkeypatch.setattr(
+        "asmr_lrc.gui_worker.probe_environment",
+        lambda *_args, **_kwargs: {"checks": [], "ok": True},
+    )
+    monkeypatch.setattr(
+        "asmr_lrc.gui_worker.create_provider", lambda _config: MissingProvider()
+    )
+
+    dispatch(
+        {
+            "protocol": 1,
+            "command": "probe",
+            "config": {
+                "cache_root": str(tmp_path / "cache"),
+                "draft_provider": {
+                    "kind": "ollama",
+                    "base_url": "http://127.0.0.1:11434",
+                    "model": "translategemma:4b",
+                    "protocol": "translategemma",
+                },
+            },
+        }
+    )
+
+    result = events(capsys.readouterr().out)[0]["result"]
+    assert result["provider_checks"][0]["install_command"] == (
+        "ollama pull translategemma:4b"
+    )

@@ -96,6 +96,10 @@ ProviderSettings ParseProvider(const JsonObject& object, const ProviderSettings&
     result.base_url = StringOr(object, L"base_url", fallback.base_url);
     result.model = StringOr(object, L"model", fallback.model);
     result.strict_schema = BoolOr(object, L"strict_schema", fallback.strict_schema);
+    result.protocol = StringOr(
+        object,
+        L"protocol",
+        result.model.rfind(L"translategemma:", 0) == 0 ? L"translategemma" : L"chat-json");
     return result;
 }
 
@@ -105,6 +109,7 @@ JsonObject ProviderJson(const ProviderSettings& provider) {
     object.SetNamedValue(L"base_url", JsonValue::CreateStringValue(provider.base_url));
     object.SetNamedValue(L"model", JsonValue::CreateStringValue(provider.model));
     object.SetNamedValue(L"strict_schema", JsonValue::CreateBooleanValue(provider.strict_schema));
+    object.SetNamedValue(L"protocol", JsonValue::CreateStringValue(provider.protocol));
     return object;
 }
 
@@ -182,6 +187,10 @@ std::wstring FindFfmpegExecutable() {
 
 AppSettings LoadSettings() {
     AppSettings defaults;
+    defaults.draft.protocol = L"translategemma";
+    defaults.analysis.model = L"qwen3.5-9b-abliterated:latest";
+    defaults.analysis.protocol = L"chat-json";
+    defaults.fallback = defaults.analysis;
     defaults.python_path = FindPythonInterpreter();
     defaults.ffmpeg_path = FindFfmpegExecutable();
     const auto project_root = ProjectRootFromPython(defaults.python_path);
@@ -237,11 +246,24 @@ AppSettings ParseSettingsUtf8(const std::string_view json, AppSettings defaults)
     defaults.review_same_as_draft =
         BoolOr(root, L"review_same_as_draft", defaults.review_same_as_draft);
     defaults.quality_mode = BoolOr(root, L"quality_mode", defaults.quality_mode);
+    defaults.analysis_enabled = BoolOr(root, L"analysis_enabled", defaults.analysis_enabled);
+    defaults.fallback_enabled = BoolOr(root, L"fallback_enabled", defaults.fallback_enabled);
     if (root.HasKey(L"draft")) {
         defaults.draft = ParseProvider(root.GetNamedObject(L"draft"), defaults.draft);
     }
+    if (root.HasKey(L"review_enabled")) {
+        defaults.review_enabled = root.GetNamedBoolean(L"review_enabled", defaults.review_enabled);
+    } else {
+        defaults.review_enabled = defaults.draft.protocol != L"translategemma";
+    }
     if (root.HasKey(L"review")) {
         defaults.review = ParseProvider(root.GetNamedObject(L"review"), defaults.review);
+    }
+    if (root.HasKey(L"analysis")) {
+        defaults.analysis = ParseProvider(root.GetNamedObject(L"analysis"), defaults.analysis);
+    }
+    if (root.HasKey(L"fallback")) {
+        defaults.fallback = ParseProvider(root.GetNamedObject(L"fallback"), defaults.fallback);
     }
     return defaults;
 }
@@ -269,9 +291,17 @@ std::string SerializeSettingsUtf8(const AppSettings& settings) {
                        JsonValue::CreateBooleanValue(settings.setup_completed));
     root.SetNamedValue(L"review_same_as_draft",
                        JsonValue::CreateBooleanValue(settings.review_same_as_draft));
+    root.SetNamedValue(L"review_enabled",
+                       JsonValue::CreateBooleanValue(settings.review_enabled));
+    root.SetNamedValue(L"analysis_enabled",
+                       JsonValue::CreateBooleanValue(settings.analysis_enabled));
+    root.SetNamedValue(L"fallback_enabled",
+                       JsonValue::CreateBooleanValue(settings.fallback_enabled));
     root.SetNamedValue(L"quality_mode", JsonValue::CreateBooleanValue(settings.quality_mode));
     root.SetNamedValue(L"draft", ProviderJson(settings.draft));
     root.SetNamedValue(L"review", ProviderJson(settings.review));
+    root.SetNamedValue(L"analysis", ProviderJson(settings.analysis));
+    root.SetNamedValue(L"fallback", ProviderJson(settings.fallback));
     return WideToUtf8(std::wstring(root.Stringify()));
 }
 

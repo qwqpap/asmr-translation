@@ -9,8 +9,9 @@ namespace asmr {
 struct ProviderSettings {
     std::wstring kind = L"ollama";
     std::wstring base_url = L"http://127.0.0.1:11434";
-    std::wstring model = L"qwen3.5-9b-abliterated:latest";
+    std::wstring model = L"translategemma:4b";
     bool strict_schema = true;
+    std::wstring protocol = L"chat-json";
 };
 
 struct AppSettings {
@@ -29,7 +30,12 @@ struct AppSettings {
     bool setup_completed = false;
     ProviderSettings draft;
     ProviderSettings review;
+    ProviderSettings analysis;
+    ProviderSettings fallback;
+    bool analysis_enabled = true;
+    bool fallback_enabled = true;
     bool review_same_as_draft = true;
+    bool review_enabled = false;
     bool quality_mode = true;
 };
 

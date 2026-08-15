@@ -6,7 +6,10 @@ Windows 本地日语 ASMR 转写、上下文翻译与同步台词播放器。
 
 - Python 核心使用 `faster-whisper` 转写，默认通过本机 Ollama 翻译。
 - C++20 原生 Win32 GUI 提供任务、播放器、下载和设置四页，不依赖 Qt/WPF。
-- 质量模式执行语境预分析、12 行批量初译和全量终审；平衡模式保留单遍流程。
+- 默认由 `translategemma:4b` 专职完成日语→简体中文主翻译；当前 Qwen
+  `qwen3.5-9b-abliterated:latest` 只做语境分析和 TranslateGemma 失败兜底。
+- 质量模式按全局阶段执行：全部 ASR → 全部 Qwen 语境分析并卸载 → 12 行批量
+  TranslateGemma；全量二次审校默认关闭，可在设置页单独启用。
 - 可分别为初译和终审选择 Ollama 或 OpenAI-compatible `/v1/chat/completions`。
 - 音频默认不上传；外部 API 只发送用户明确授权的转写文本。
 
@@ -59,14 +62,23 @@ CUDA、FFmpeg、Ollama 或 Whisper 模型。首次启动会打开依赖向导；
 ### 开发者：手工环境
 
 要求 Windows 10/11、Python 3.12、FFmpeg；本地翻译还需要 Ollama。CUDA 为当前
-`large-v3` 实机配置，CPU 仅适合诊断。
+`large-v3` 实机配置，CPU 仅适合诊断。TranslateGemma 与 Qwen 模型都保留在当前
+Ollama C 盘目录，不会由程序静默下载。
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,cuda]"
 .\.venv\Scripts\python.exe -m asmr_lrc --probe
+# 依赖向导/探测报告缺失模型时，按报告中的精确命令手工安装：
+ollama pull translategemma:4b
+ollama pull qwen3.5-9b-abliterated:latest
 ```
+
+GTX 1660 Ti 6GB 的默认规则是阶段化加载：Whisper ASR 子进程结束后才加载
+Qwen；全部语境完成后卸载 Qwen，再加载 TranslateGemma。失败批次才再次加载
+Qwen，两个翻译模型不会默认同时常驻；预计需要约 3.3GB TranslateGemma 磁盘空间
+加上现有 Qwen 约 5.3GB（另有 Ollama 元数据和缓存余量）。
 
 项目不会自动下载模型。准备好的 faster-whisper 目录应包含 `model.bin`；浏览器有时会把
 二进制权重误存为 `.mht`，确认文件头与目标后只需改名，不要转换内容。
@@ -96,6 +108,12 @@ MSI 安装版优先使用 `%LocalAppData%\ASMR Translation\runtime` 下的嵌入
 
 # 默认质量模式
 .\.venv\Scripts\python.exe -m asmr_lrc "D:\ASMR" --quality-mode quality
+
+# 显式指定角色（默认已经是这组）
+.\.venv\Scripts\python.exe -m asmr_lrc "D:\ASMR" `
+  --ollama-model translategemma:4b --ollama-protocol translategemma `
+  --analysis-model qwen3.5-9b-abliterated:latest `
+  --fallback-model qwen3.5-9b-abliterated:latest --no-review
 
 # 单遍平衡模式
 .\.venv\Scripts\python.exe -m asmr_lrc "D:\ASMR" --quality-mode balanced --no-review
@@ -147,8 +165,9 @@ translation.zh-CN.json
 process.log
 ```
 
-翻译 v2 profile 包含提供方、模型、提示词版本、上下文策略、审校模式和术语哈希，不含
-API Key。损坏缓存会隔离为 `*.corrupt-N`，旧 Schema 会保留为 `*.stale-N`。
+翻译 v2 profile 包含提供方、模型、协议、主翻译/分析/兜底角色、提示词版本、上下文
+策略、审校模式和术语哈希，不含 API Key；切换 Qwen 与 TranslateGemma 不会误复用旧
+缓存。损坏缓存会隔离为 `*.corrupt-N`，旧 Schema 会保留为 `*.stale-N`。
 
 ## 验证
 
@@ -160,8 +179,11 @@ ctest --test-dir native/build -C Release --output-on-failure
 .\.venv\Scripts\python.exe tools\evaluate_quality_cases.py
 ```
 
-质量 fixture 的可翻译项为 24/24，四个严重案例全部通过；结构通过仍不代替全音频人工
-听感验收。当前实机证据与尚未完成的视觉门槛见 [docs/VALIDATION.md](docs/VALIDATION.md)。
+基线 Qwen 质量 fixture 的可翻译项为 24/24，四个严重案例全部通过；当前 TranslateGemma
+实机结果为 21/24 个可翻译项通过、严重项零失败，尚未满足 24/24 发布门槛。仓库另有 20
+条明确成人语境合成 fixture，检查拒译、否定反转、体位指令和耳语表达不会被净化。结构
+通过仍不代替 TranslateGemma 实机盲测和全音频人工听感验收；完整结果见
+[docs/VALIDATION.md](docs/VALIDATION.md)。
 
 ## 发布与构建
 

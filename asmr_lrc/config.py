@@ -7,6 +7,15 @@ from .providers import ProviderConfig
 from .translation_context import CONTEXT_PROMPT_VERSION, GlossaryTerm
 
 SUPPORTED_AUDIO_EXTENSIONS = frozenset({".mp3", ".m4a", ".flac", ".wav", ".opus", ".ogg", ".aac"})
+DEFAULT_TRANSLATION_MODEL = "translategemma:4b"
+LEGACY_TRANSLATION_MODEL = "qwen3.5-9b-abliterated:latest"
+DEFAULT_ANALYSIS_MODEL = LEGACY_TRANSLATION_MODEL
+
+
+def protocol_for_model(model: str) -> str:
+    """Infer the bundled prompt protocol while allowing explicit overrides."""
+    model_name = model.casefold().split(":", 1)[0]
+    return "translategemma" if model_name == "translategemma" else "chat-json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +44,7 @@ class AppConfig:
     compute_type: str = "int8_float16"
     language: str = "ja"
     ffmpeg_path: str = "ffmpeg"
-    ollama_model: str = "qwen3.5-9b-abliterated:latest"
+    ollama_model: str = DEFAULT_TRANSLATION_MODEL
     ollama_url: str = "http://127.0.0.1:11434"
     # Keep the model warm within the translation phase; pipeline unloads it once at the end.
     ollama_keep_alive: str = "5m"
@@ -48,6 +57,8 @@ class AppConfig:
     review_enabled: bool = True
     draft_provider: ProviderConfig | None = None
     review_provider: ProviderConfig | None = None
+    analysis_provider: ProviderConfig | None = None
+    fallback_provider: ProviderConfig | None = None
     pinned_glossary: tuple[GlossaryTerm, ...] = ()
     overwrite: bool = False
     filter: FilterConfig = field(default_factory=FilterConfig)
@@ -76,10 +87,35 @@ class AppConfig:
                     base_url=self.ollama_url,
                     model=self.ollama_model,
                     keep_alive=self.ollama_keep_alive,
+                    protocol=protocol_for_model(self.ollama_model),
                 ),
             )
+        assert self.draft_provider is not None
+        # Legacy configurations used the draft model for context analysis. A
+        # TranslateGemma draft must not be silently used for that task because
+        # its official prompt contract is translation-only.
+        if self.analysis_provider is None:
+            if self.draft_provider.protocol == "translategemma":
+                object.__setattr__(
+                    self,
+                    "analysis_provider",
+                    ProviderConfig(
+                        kind="ollama",
+                        base_url=self.draft_provider.base_url,
+                        model=DEFAULT_ANALYSIS_MODEL,
+                        keep_alive=self.draft_provider.keep_alive,
+                        protocol="chat-json",
+                    ),
+                )
+            else:
+                object.__setattr__(self, "analysis_provider", self.draft_provider)
+        if self.fallback_provider is None:
+            object.__setattr__(self, "fallback_provider", self.analysis_provider)
         if self.review_enabled and self.review_provider is None:
-            object.__setattr__(self, "review_provider", self.draft_provider)
+            if self.draft_provider.protocol == "translategemma":
+                object.__setattr__(self, "review_enabled", False)
+            else:
+                object.__setattr__(self, "review_provider", self.draft_provider)
 
     def translation_profile_id(self) -> str:
         assert self.draft_provider is not None
@@ -94,6 +130,12 @@ class AppConfig:
             "draft_provider": self.draft_provider.cache_identity(),
             "review_provider": (
                 None if self.review_provider is None else self.review_provider.cache_identity()
+            ),
+            "analysis_provider": (
+                None if self.analysis_provider is None else self.analysis_provider.cache_identity()
+            ),
+            "fallback_provider": (
+                None if self.fallback_provider is None else self.fallback_provider.cache_identity()
             ),
             "pinned_glossary": [term.to_dict() for term in self.pinned_glossary],
         }
