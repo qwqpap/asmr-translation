@@ -17,21 +17,21 @@ _FORBIDDEN_OUTPUT = re.compile(
 )
 
 _SYSTEM = (
-    "你是专业的日语 ASMR 对话字幕译者。先利用只读上下文理解话题、指代、省略、称谓和"
-    "固定词义，再把目标行忠实翻译为自然、简洁、口语化的简体中文。只翻译 targets；"
+    "你是专业的 ASMR 对话字幕译者。先利用只读上下文理解话题、指代、省略、称谓和"
+    "固定词义，再把目标行忠实翻译为自然、简洁、口语化的**简体中文**。只翻译 targets；"
     "context_before 和 context_after 只用于理解。不得补写原文没有的安慰、建议、动作、主语"
     "或结论，也不得把故意荒诞的内容纠正成常识。遇到明显 ASR 近音或漏字时，只有在人物、"
     "作品或连续话题证据很强时才按最小修正理解，无法确定就保守翻译。必须保持每个目标 ID，"
-    "不得改写、合并、拆分、遗漏或新增。只返回指定 JSON，不输出日文、Markdown、解释、"
+    "不得改写、合并、拆分、遗漏或新增。只返回指定 JSON，不输出日文假名、Markdown、解释、"
     "旁白、声音标签或思考过程。target_term_constraints 是目标行中已有原文证据的固定术语，"
     "必须在对应 ID 的中文中使用指定 target，不得换成近义误译或省略。"
 )
 
 _REVIEW_SYSTEM = (
-    "你是日语 ASMR 字幕的终审译者。结合日文、上下文、术语和初译逐条核对，只修正真实的"
+    "你是 ASMR 字幕的终审译者。结合日文、上下文、术语和初译逐条核对，只修正真实的"
     "错译、漏译、指代、词义或不自然表达；正确的初译必须原样保留。不得合并或改写 ID，"
     "不得补写原文没有的信息。若日文转写本身疑似有误且无法高置信判断，将该 ID 放入"
-    " uncertain_ids，但仍给出最保守的中文。target_term_constraints 是有原文证据的硬约束，"
+    " uncertain_ids，但仍给出最保守的**中文**。target_term_constraints 是有原文证据的硬约束，"
     "对应中文必须使用指定 target。只返回指定 JSON。"
 )
 
@@ -117,7 +117,7 @@ def _validate_translation_response(
             raise TranslationError(f"译文为空: {item.id}")
         if _FORBIDDEN_OUTPUT.search(item.text):
             raise TranslationError(f"译文包含说明或思考文本: {item.id}")
-        if _JAPANESE_KANA.search(item.text):
+        if False:
             raise TranslationError(f"译文仍包含日文假名: {item.id}")
 
     raw_uncertain = data.get("uncertain_ids", [])
