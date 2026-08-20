@@ -160,16 +160,38 @@ int wmain() {
     settings.ffmpeg_path = L"C:\\工具\\ffmpeg.exe";
     settings.cache_root = L"C:\\很长的中文路径\\缓存";
     settings.glossary_path = L"C:\\资料库\\固定术语.json";
+    settings.download_root = L"C:\\Users\\测试\\Downloads\\ASMR Translation";
+    settings.download_endpoint = L"https://api.example.test";
+    settings.curl_path = L"C:\\工具\\curl.exe";
+    settings.download_proxy = L"http://127.0.0.1:8080";
+    settings.download_connect_timeout = 17;
+    settings.setup_prompted = true;
+    settings.setup_completed = false;
     settings.draft.kind = L"openai";
     settings.draft.base_url = L"https://example.test/v1";
     settings.draft.model = L"draft-model";
+    settings.draft.protocol = L"chat-json";
     settings.review_same_as_draft = false;
     const auto settings_json = asmr::SerializeSettingsUtf8(settings);
     const auto loaded = asmr::ParseSettingsUtf8(settings_json);
     Check(loaded.python_path == settings.python_path, "settings Unicode round trip");
     Check(loaded.asr_model == settings.asr_model, "settings ASR model path");
     Check(loaded.glossary_path == settings.glossary_path, "settings glossary path");
+    Check(loaded.download_root == settings.download_root, "settings download root");
+    Check(loaded.download_endpoint == settings.download_endpoint, "settings download endpoint");
+    Check(loaded.download_connect_timeout == settings.download_connect_timeout,
+          "settings download timeout");
+    Check(loaded.setup_prompted == settings.setup_prompted, "settings setup prompted");
+    Check(loaded.setup_completed == settings.setup_completed, "settings setup completed");
+    Check(asmr::IsEmbeddedPython(
+              L"C:\\Users\\测试\\AppData\\Local\\ASMR Translation\\runtime\\"
+              L"python-3.12-embed-amd64\\python.exe"),
+          "recognize embedded Python path");
     Check(loaded.draft.model == settings.draft.model, "settings provider model");
+    Check(loaded.draft.protocol == settings.draft.protocol, "settings provider protocol");
+    const auto legacy = asmr::ParseSettingsUtf8(
+        R"({"draft":{"kind":"ollama","base_url":"http://local","model":"qwen3.5-9b-abliterated:latest"}})");
+    Check(legacy.draft.protocol == L"chat-json", "legacy settings infer chat-json protocol");
     Check(settings_json.find("api_key") == std::string::npos,
           "settings never serialize API key");
 
@@ -184,6 +206,8 @@ int wmain() {
     }
     Check(rejected_protocol, "reject unknown worker protocol");
     Check(asmr::IsTerminalWorkerEvent(L"probe_result"), "probe result is terminal");
+    Check(asmr::IsTerminalWorkerEvent(L"download_metadata"), "download metadata is terminal");
+    Check(asmr::IsTerminalWorkerEvent(L"download_complete"), "download complete is terminal");
     Check(asmr::IsTerminalWorkerEvent(L"result"), "pipeline result is terminal");
     Check(asmr::IsTerminalWorkerEvent(L"error"), "worker error is terminal");
     Check(!asmr::IsTerminalWorkerEvent(L"log"), "worker log is not terminal");

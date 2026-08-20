@@ -7,7 +7,12 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .config import AppConfig
+from .config import (
+    DEFAULT_ANALYSIS_MODEL,
+    DEFAULT_TRANSLATION_MODEL,
+    AppConfig,
+    protocol_for_model,
+)
 from .environment import probe_environment
 from .pipeline import run_pipeline
 from .providers import ProviderConfig, create_provider
@@ -35,8 +40,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="cuda", choices=("cuda", "cpu"))
     parser.add_argument("--compute-type", default="int8_float16")
     parser.add_argument("--ffmpeg-path", default="ffmpeg", help="FFmpeg 可执行文件路径")
-    parser.add_argument("--ollama-model", default="qwen3.5-9b-abliterated:latest")
+    parser.add_argument("--ollama-model", default=DEFAULT_TRANSLATION_MODEL)
+    parser.add_argument(
+        "--ollama-protocol",
+        choices=("chat-json", "translategemma"),
+        help="主翻译模型提示协议；默认按模型名自动判断",
+    )
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    parser.add_argument(
+        "--analysis-model", help="语境分析模型；TranslateGemma 默认使用当前 Qwen 模型"
+    )
+    parser.add_argument(
+        "--analysis-protocol",
+        choices=("chat-json", "translategemma"),
+        help="语境分析提示协议；默认按模型名自动判断",
+    )
+    parser.add_argument("--analysis-url", help="语境分析 Ollama 地址；默认使用主翻译地址")
+    parser.add_argument("--fallback-model", help="主翻译失败时使用的兜底模型")
+    parser.add_argument(
+        "--fallback-protocol",
+        choices=("chat-json", "translategemma"),
+        help="失败兜底提示协议；默认按模型名自动判断",
+    )
+    parser.add_argument("--fallback-url", help="兜底 Ollama 地址；默认使用语境分析地址")
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--translation-retries", type=int, default=2)
     parser.add_argument("--quality-mode", choices=("quality", "balanced"), default="quality")
@@ -85,7 +111,11 @@ def main(argv: list[str] | None = None) -> int:
         openai_key = os.environ.get(args.openai_api_key_env)
         if args.draft_provider == "ollama":
             draft_provider = ProviderConfig(
-                "ollama", args.ollama_url, args.ollama_model, keep_alive="5m"
+                "ollama",
+                args.ollama_url,
+                args.ollama_model,
+                keep_alive="5m",
+                protocol=args.ollama_protocol or protocol_for_model(args.ollama_model),
             )
         else:
             draft_provider = ProviderConfig(
@@ -94,6 +124,34 @@ def main(argv: list[str] | None = None) -> int:
                 args.openai_model,
                 api_key=openai_key,
             )
+        analysis_provider = None
+        if args.analysis_model:
+            analysis_provider = ProviderConfig(
+                "ollama",
+                args.analysis_url or args.ollama_url,
+                args.analysis_model,
+                keep_alive="5m",
+                protocol=args.analysis_protocol or protocol_for_model(args.analysis_model),
+            )
+        elif draft_provider.protocol == "translategemma":
+            analysis_provider = ProviderConfig(
+                "ollama",
+                args.ollama_url,
+                DEFAULT_ANALYSIS_MODEL,
+                keep_alive="5m",
+                protocol="chat-json",
+            )
+        fallback_provider = None
+        if args.fallback_model:
+            fallback_provider = ProviderConfig(
+                "ollama",
+                args.fallback_url or (args.analysis_url or args.ollama_url),
+                args.fallback_model,
+                keep_alive="5m",
+                protocol=args.fallback_protocol or protocol_for_model(args.fallback_model),
+            )
+        elif analysis_provider is not None:
+            fallback_provider = analysis_provider
         if args.no_review:
             review_provider = None
         elif args.review_provider == "same":
@@ -104,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.review_base_url or args.ollama_url,
                 args.review_model or args.ollama_model,
                 keep_alive="5m",
+                protocol=protocol_for_model(args.review_model or args.ollama_model),
             )
         else:
             review_provider = ProviderConfig(
@@ -127,9 +186,11 @@ def main(argv: list[str] | None = None) -> int:
             quality_mode=args.quality_mode,
             context_before=args.context_before,
             context_after=args.context_after,
-            review_enabled=not args.no_review,
+            review_enabled=not args.no_review and draft_provider.protocol != "translategemma",
             draft_provider=draft_provider,
             review_provider=review_provider,
+            analysis_provider=analysis_provider,
+            fallback_provider=fallback_provider,
             pinned_glossary=(
                 () if args.glossary is None else load_pinned_glossary(args.glossary.resolve())
             ),
@@ -137,11 +198,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.probe:
             providers = [config.draft_provider]
-            if (
-                config.review_provider is not None
-                and config.review_provider is not config.draft_provider
+            for provider in (
+                config.review_provider,
+                config.analysis_provider,
+                config.fallback_provider,
             ):
-                providers.append(config.review_provider)
+                if provider is not None and not any(
+                    provider == existing for existing in providers if existing is not None
+                ):
+                    providers.append(provider)
             ollama_provider = next(
                 (
                     provider
@@ -162,17 +227,22 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     create_provider(provider_config).check()
                     provider_checks.append(
-                        {"kind": provider_config.kind, "model": provider_config.model, "ok": True}
-                    )
-                except Exception as exc:
-                    provider_checks.append(
                         {
                             "kind": provider_config.kind,
                             "model": provider_config.model,
-                            "ok": False,
-                            "detail": str(exc),
+                            "ok": True,
                         }
                     )
+                except Exception as exc:
+                    item = {
+                        "kind": provider_config.kind,
+                        "model": provider_config.model,
+                        "ok": False,
+                        "detail": str(exc),
+                    }
+                    if provider_config.kind == "ollama" and "模型未安装" in str(exc):
+                        item["install_command"] = f"ollama pull {provider_config.model}"
+                    provider_checks.append(item)
             result["provider_checks"] = provider_checks
             result["ok"] = bool(result["ok"]) and all(
                 bool(item["ok"]) for item in provider_checks

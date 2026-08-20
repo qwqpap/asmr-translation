@@ -9,6 +9,7 @@ from pathlib import Path
 from .control import CancelledError, CancelToken
 from .environment import ollama_running_models
 from .errors import AsrError
+from .process import ProcessTree, child_environment, spawn_kwargs
 
 
 def assert_ollama_gpu_free(base_url: str) -> None:
@@ -70,20 +71,23 @@ def run_asr_process(
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=child_environment(),
+            **spawn_kwargs(),
         )
     except OSError as exc:
         raise AsrError(f"无法启动 ASR 子进程: {exc}") from exc
-    while process.poll() is None:
-        if cancel_token is not None and cancel_token.cancelled:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-            raise CancelledError("ASR 已取消")
-        time.sleep(0.2)
-    stdout, stderr = process.communicate()
+    # A cancelled run must not leave CUDA memory pinned by an orphaned worker, so
+    # the child owns its own process tree and is torn down as a whole.
+    tree = ProcessTree(process)
+    try:
+        while process.poll() is None:
+            if cancel_token is not None and cancel_token.cancelled:
+                tree.stop()
+                raise CancelledError("ASR 已取消")
+            time.sleep(0.2)
+        stdout, stderr = process.communicate()
+    finally:
+        tree.close()
     debug = (stdout + "\n" + stderr).strip()
     with log_path.open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(f"ASR command model={model} device={device} compute_type={compute_type}\n")

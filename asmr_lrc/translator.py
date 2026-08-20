@@ -13,25 +13,30 @@ from .translation_context import CONTEXT_PROMPT_VERSION, ContextMemory
 
 _JAPANESE_KANA = re.compile(r"[\u3040-\u30ff]")
 _FORBIDDEN_OUTPUT = re.compile(
-    r"```|思考过程|翻译说明|以下是|原文[：:]|作为(?:一名|一个)?AI", re.IGNORECASE
+    r"```|思考过程|翻译说明|以下是|原文[：:]|作为(?:一名|一个)?AI|"
+    r"(?:无法|不能|不可以|拒绝)翻译|(?:I\s*(?:can not|cannot|can't)|unable to)\s+translate|"
+    r"(?:I['’]?m\s+sorry|sorry),?\s+(?:I|无法|不能)",
+    re.IGNORECASE,
 )
+_HAN = re.compile(r"[\u3400-\u9fff]")
 
 _SYSTEM = (
-    "你是专业的日语 ASMR 对话字幕译者。先利用只读上下文理解话题、指代、省略、称谓和"
-    "固定词义，再把目标行忠实翻译为自然、简洁、口语化的简体中文。只翻译 targets；"
+    "你是专业的 ASMR 对话字幕译者。先利用只读上下文理解话题、指代、省略、称谓和"
+    "固定词义，再把目标行忠实翻译为自然、简洁、口语化的**简体中文**。只翻译 targets；"
     "context_before 和 context_after 只用于理解。不得补写原文没有的安慰、建议、动作、主语"
-    "或结论，也不得把故意荒诞的内容纠正成常识。遇到明显 ASR 近音或漏字时，只有在人物、"
+    "或结论，也不得把故意荒诞的内容纠正成常识。必须保留成人、直白、粗俗、性相关和耳语"
+    "表达，不得审查、净化或改写为委婉语。遇到明显 ASR 近音或漏字时，只有在人物、"
     "作品或连续话题证据很强时才按最小修正理解，无法确定就保守翻译。必须保持每个目标 ID，"
-    "不得改写、合并、拆分、遗漏或新增。只返回指定 JSON，不输出日文、Markdown、解释、"
+    "不得改写、合并、拆分、遗漏或新增。只返回指定 JSON，不输出日文假名、Markdown、解释、"
     "旁白、声音标签或思考过程。target_term_constraints 是目标行中已有原文证据的固定术语，"
     "必须在对应 ID 的中文中使用指定 target，不得换成近义误译或省略。"
 )
 
 _REVIEW_SYSTEM = (
-    "你是日语 ASMR 字幕的终审译者。结合日文、上下文、术语和初译逐条核对，只修正真实的"
+    "你是 ASMR 字幕的终审译者。结合日文、上下文、术语和初译逐条核对，只修正真实的"
     "错译、漏译、指代、词义或不自然表达；正确的初译必须原样保留。不得合并或改写 ID，"
     "不得补写原文没有的信息。若日文转写本身疑似有误且无法高置信判断，将该 ID 放入"
-    " uncertain_ids，但仍给出最保守的中文。target_term_constraints 是有原文证据的硬约束，"
+    " uncertain_ids，但仍给出最保守的**中文**。target_term_constraints 是有原文证据的硬约束，"
     "对应中文必须使用指定 target。只返回指定 JSON。"
 )
 
@@ -117,7 +122,10 @@ def _validate_translation_response(
             raise TranslationError(f"译文为空: {item.id}")
         if _FORBIDDEN_OUTPUT.search(item.text):
             raise TranslationError(f"译文包含说明或思考文本: {item.id}")
-        if _JAPANESE_KANA.search(item.text):
+        # Public validation has no source segment available. Reject kana-only
+        # answers while allowing Chinese proper nouns with a small amount of
+        # Japanese script.
+        if _untranslated_output(item.text):
             raise TranslationError(f"译文仍包含日文假名: {item.id}")
 
     raw_uncertain = data.get("uncertain_ids", [])
@@ -127,6 +135,32 @@ def _validate_translation_response(
     if len(set(uncertain)) != len(uncertain) or not set(uncertain).issubset(expected_ids):
         raise TranslationError("uncertain_ids 包含重复或未知 ID")
     return tuple(items), uncertain
+
+
+def _untranslated_output(
+    text: str,
+    source: str | None = None,
+    *,
+    allowed_terms: Sequence[str] = (),
+) -> bool:
+    value = text.strip()
+    if not value:
+        return True
+    if (
+        source is not None
+        and value == source.strip()
+        and not any(term and term in value for term in allowed_terms)
+    ):
+        return True
+    kana = len(_JAPANESE_KANA.findall(value))
+    if not kana:
+        return False
+    han = len(_HAN.findall(value))
+    if han == 0:
+        return True
+    if any(term and term in value for term in allowed_terms):
+        return False
+    return kana >= 4 and kana / max(1, len(value)) >= 0.45
 
 
 def validate_translation(
@@ -158,6 +192,7 @@ def build_contextual_prompt(
     drafts: dict[str, str] | None = None,
     max_prompt_characters: int = 24_000,
     constraint_repair: bool = False,
+    protocol: str = "chat-json",
 ) -> str:
     if not target_indices:
         raise ValueError("target_indices 不能为空")
@@ -224,6 +259,17 @@ def build_contextual_prompt(
 
     def render(payload: dict[str, object], *, trimmed: bool = False) -> str:
         trim_note = "上下文已按字符预算保留最近邻内容。" if trimmed else ""
+        if protocol == "translategemma":
+            return (
+                "Translate the following text from Japanese (ja) to Simplified Chinese "
+                "(zh-Hans). Accurately convey the meaning, nuance, register, and explicit "
+                "or vulgar wording of the original. Do not censor, moralize, "
+                "add information, or explain your choices. Translate only the values "
+                "inside targets; use context_before and context_after only for context. "
+                "Preserve every target ID and return only the JSON object required by "
+                "the response schema. "
+                f"{trim_note}\n\n{json.dumps(payload, ensure_ascii=False)}"
+            )
         return (
             f"执行{stage}。{lexical_notes}{trim_note}\n"
             "输出 translations 必须以 targets 中的精确 ID 为键；"
@@ -267,6 +313,30 @@ def build_contextual_prompt(
 
     payload = make_payload()
     return render(payload, trimmed=trimmed)
+
+
+def build_translategemma_prompt(
+    all_segments: Sequence[Segment],
+    target_indices: tuple[int, ...],
+    *,
+    memory: ContextMemory,
+    context_before: int,
+    context_after: int,
+    drafts: dict[str, str] | None = None,
+    max_prompt_characters: int = 24_000,
+    constraint_repair: bool = False,
+) -> str:
+    return build_contextual_prompt(
+        all_segments,
+        target_indices,
+        memory=memory,
+        context_before=context_before,
+        context_after=context_after,
+        drafts=drafts,
+        max_prompt_characters=max_prompt_characters,
+        constraint_repair=constraint_repair,
+        protocol="translategemma",
+    )
 
 
 def _confidence_flags(segment: Segment) -> list[str]:
@@ -368,9 +438,14 @@ def translate_contextual_batch(
         feedback = "" if not errors else f"\n上一次输出校验失败：{errors[-1]}"
         constraint_repair = any(error.startswith("固定术语未遵守") for error in errors)
         try:
+            prompt_builder = (
+                build_translategemma_prompt
+                if provider.config.protocol == "translategemma"
+                else build_contextual_prompt
+            )
             response = provider.generate(
                 system=_SYSTEM if drafts is None else _REVIEW_SYSTEM,
-                prompt=build_contextual_prompt(
+                prompt=prompt_builder(
                     all_segments,
                     target_indices,
                     memory=memory,
@@ -387,6 +462,20 @@ def translate_contextual_batch(
                 json.loads(response.text), expected_ids, strict_root=True
             )
             for segment, item in zip(targets, items, strict=True):
+                allowed_terms = tuple(
+                    term.source
+                    for term in memory.terms
+                    if term.pinned
+                    and term.source in segment.text
+                    and term.target in item.text
+                )
+                if _untranslated_output(
+                    item.text,
+                    segment.text,
+                    allowed_terms=allowed_terms,
+                ):
+                    raise TranslationError(f"译文疑似未翻译: {segment.id}")
+            for segment, item in zip(targets, items, strict=True):
                 missing = [
                     f"{term.source}=>{term.target}"
                     for term in memory.terms
@@ -400,7 +489,7 @@ def translate_contextual_batch(
                     )
             repaired_ids: set[str] = set()
             repair_metrics: list[dict[str, object]] = []
-            if attempt == retries:
+            if attempt == retries and provider.config.protocol != "translategemma":
                 repaired_items = list(items)
                 for index, (segment, item) in enumerate(zip(targets, items, strict=True)):
                     if not _term_conflict(segment, item.text, memory):
@@ -489,9 +578,16 @@ def translate_batch(
     model: str,
     retries: int,
     keep_alive: str,
+    protocol: str | None = None,
 ) -> tuple[tuple[TranslationItem, ...], dict[str, object]]:
     provider = create_provider(
-        ProviderConfig("ollama", base_url, model, keep_alive=keep_alive)
+        ProviderConfig(
+            "ollama",
+            base_url,
+            model,
+            keep_alive=keep_alive,
+            protocol=protocol,
+        )
     )
     return translate_contextual_batch(
         segments,
@@ -512,10 +608,17 @@ def translate_segments(
     batch_size: int,
     retries: int,
     keep_alive: str,
+    protocol: str | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> tuple[tuple[TranslationItem, ...], tuple[dict[str, object], ...]]:
     provider = create_provider(
-        ProviderConfig("ollama", base_url, model, keep_alive=keep_alive)
+        ProviderConfig(
+            "ollama",
+            base_url,
+            model,
+            keep_alive=keep_alive,
+            protocol=protocol,
+        )
     )
     provider.check()
     translated: list[TranslationItem] = []

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "release": "0.3.0",
+  "python": {
+    "version": "3.12.x",
+    "archive": "python-3.12.x-embed-amd64.zip",
+    "url": "https://www.python.org/ftp/python/3.12.x/python-3.12.x-embed-amd64.zip",
+    "size": 0,
+    "sha256": "REPLACE_WITH_OFFICIAL_SHA256"
+  },
+  "pip_bootstrap": {
+    "name": "get-pip.py",
+    "url": "https://bootstrap.pypa.io/get-pip.py",
+    "size": 0,
+    "sha256": "REPLACE_WITH_OFFICIAL_SHA256"
+  },
+  "wheels": {
+    "project": {
+      "name": "asmr_lrc-0.3.0-py3-none-any.whl",
+      "path": "../wheel/asmr_lrc-0.3.0-py3-none-any.whl",
+      "size": 0,
+      "sha256": "GENERATED_BY_BUILD"
+    },
+    "cpu_lock": {
+      "path": "deps/requirements-cpu.lock",
+      "size": 0,
+      "sha256": "GENERATED_BY_BUILD"
+    },
+    "cuda_lock": {
+      "path": "deps/requirements-cuda.lock",
+      "size": 0,
+      "sha256": "GENERATED_BY_BUILD"
+    }
+  },
+  "ffmpeg": null,
+  "whisper_model": null
+}

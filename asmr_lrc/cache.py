@@ -10,6 +10,7 @@ from typing import Any
 
 from .errors import CacheError
 from .models import SourceIdentity
+from .platform_paths import normalize_path_for_identity
 
 
 def source_identity(path: Path, *, chunk_size: int = 1024 * 1024) -> SourceIdentity:
@@ -28,7 +29,12 @@ def source_identity(path: Path, *, chunk_size: int = 1024 * 1024) -> SourceIdent
 
 
 def cache_key(source: SourceIdentity) -> str:
-    path_hash = hashlib.sha256(source.path.casefold().encode("utf-8")).hexdigest()[:16]
+    # Case folding is correct where the filesystem is case-insensitive and wrong
+    # where it is not: on Linux, /a/Track.mp3 and /a/track.mp3 are two files and
+    # must not share one transcript.  Windows keys stay byte-identical to v0.3.
+    path_hash = hashlib.sha256(
+        normalize_path_for_identity(source.path).encode("utf-8")
+    ).hexdigest()[:16]
     return f"{path_hash}-{source.fingerprint[:16]}"
 
 

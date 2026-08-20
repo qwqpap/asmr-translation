@@ -8,7 +8,9 @@ from asmr_lrc.models import Segment
 from asmr_lrc.providers import ProviderConfig, ProviderResponse
 from asmr_lrc.translation_context import ContextMemory, GlossaryTerm
 from asmr_lrc.translator import (
+    _untranslated_output,
     build_contextual_prompt,
+    build_translategemma_prompt,
     translate_contextual_batch,
     translation_schema,
     validate_translation,
@@ -49,6 +51,7 @@ def test_translation_validation_reorders_by_expected_id() -> None:
     [
         {"translations": [{"id": "s1", "text": ""}]},
         {"translations": [{"id": "s1", "text": "こんにちは"}]},
+        {"translations": [{"id": "s1", "text": "抱歉，我无法翻译这段内容"}]},
         {"translations": [{"id": "s1", "text": "```中文```"}]},
         {"translations": [{"id": "s2", "text": "你好"}]},
         {"translations": [{"id": "s1", "text": "你好"}, {"id": "s1", "text": "好"}]},
@@ -57,6 +60,51 @@ def test_translation_validation_reorders_by_expected_id() -> None:
 def test_translation_validation_rejects_invalid_output(data: object) -> None:
     with pytest.raises(TranslationError):
         validate_translation(data, ("s1",))
+
+
+def test_translategemma_prompt_uses_official_language_pair_and_adult_fidelity() -> None:
+    prompt = build_translategemma_prompt(
+        (Segment("s1", 0, 1, "成人向けの言葉もそのまま伝える。"),),
+        (0,),
+        memory=ContextMemory(),
+        context_before=0,
+        context_after=0,
+    )
+
+    assert "Japanese (ja)" in prompt
+    assert "Simplified Chinese (zh-Hans)" in prompt
+    assert "explicit or vulgar wording" in prompt
+    assert '"id": "s1"' in prompt
+
+
+def test_untranslated_detector_allows_pinned_proper_term() -> None:
+    assert _untranslated_output("星野アイちゃん", "星野アイちゃん")
+    assert not _untranslated_output(
+        "星野アイちゃん", "星野アイちゃん", allowed_terms=("アイちゃん",)
+    )
+
+
+def test_refusal_detector_does_not_reject_consent_wording() -> None:
+    validate_translation(
+        {
+            "translations": {
+                "s1": "如果被拒绝，就不要再要求。",
+            }
+        },
+        ("s1",),
+    )
+
+
+def test_refusal_detector_rejects_refusal_to_translate() -> None:
+    with pytest.raises(TranslationError, match="说明或思考文本"):
+        validate_translation(
+            {
+                "translations": {
+                    "s1": "抱歉，我无法翻译这段内容。",
+                }
+            },
+            ("s1",),
+        )
 
 
 def test_translate_batch_retries_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:

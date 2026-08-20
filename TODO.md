@@ -1,8 +1,9 @@
 # ASMR 日语音频转中文 LRC：v0.1 历史 TODO
 
 > 本文保留 v0.1 命令行版本的原始范围。v0.2 已新增上下文双阶段翻译、外部
-> OpenAI-compatible 路由和原生 Win32 GUI；当前说明与验收以 README 和
-> `docs/VALIDATION.md` 为准。
+> OpenAI-compatible 路由和原生 Win32 GUI；v0.3 又加入 TranslateGemma 主翻译和
+> Windows/Linux 通用的 Qt 前端 `asmr_gui`。因此下文的“仅 Windows”和“不做 GUI”只是
+> 历史记录，当前说明与验收以 README 和 `docs/VALIDATION.md` 为准。
 
 ## 1. 项目目标
 
@@ -299,11 +300,12 @@ tests/
 
 ### M7：文档与交付
 
-- [ ] 编写安装、模型准备和首次运行说明。
-- [ ] 说明 CUDA 不可用、显存不足、Ollama 未启动等常见问题。
-- [ ] 提供不覆盖已有 LRC 的安全说明。
-- [ ] 记录已验证的模型、参数、GPU、驱动和依赖版本。
-- [ ] 给出完整卸载或清理缓存方法，但不自动删除用户数据。
+- [x] 编写安装、模型准备和首次运行说明（见 `docs/INSTALL_WINDOWS.md`）。
+- [x] 说明 CUDA 不可用、显存不足、Ollama 未启动等常见问题（见 `docs/TROUBLESHOOTING.md`）。
+- [x] 提供不覆盖已有 LRC 的安全说明。
+- [x] 记录已验证的模型、参数、GPU、驱动和依赖版本。
+- [x] 给出完整卸载或清理缓存方法，但不自动删除用户数据。
+- [ ] 在发布机填充固定依赖哈希并完成 WiX MSI 普通用户实窗验收。
 
 ## 9. 第一版验收标准
 

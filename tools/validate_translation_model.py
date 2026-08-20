@@ -16,7 +16,12 @@ SAMPLES = (
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="验证 Ollama 日中翻译 JSON 协议稳定性")
-    parser.add_argument("--model", default="qwen3.5-9b-abliterated:latest")
+    parser.add_argument("--model", default="translategemma:4b")
+    parser.add_argument(
+        "--protocol",
+        choices=("chat-json", "translategemma"),
+        help="提示协议；默认按模型名推断",
+    )
     parser.add_argument("--url", default="http://127.0.0.1:11434")
     parser.add_argument("--rounds", type=int, default=3)
     args = parser.parse_args()
@@ -32,6 +37,7 @@ def main() -> int:
                 model=args.model,
                 retries=2,
                 keep_alive="5m",
+                protocol=args.protocol,
             )
             results.append(
                 {
@@ -50,4 +56,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
