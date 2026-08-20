@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Application icon: an audio waveform above a subtitle bar, i.e. the two halves
+  of what the app does.  Scalable so one file covers every icon size the
+  hicolor theme asks for.  Colours match the Fusion dark palette in
+  asmr_gui/app.py.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f3541"/>
+      <stop offset="1" stop-color="#1b1f27"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#bg)"/>
+  <rect x="4.5" y="4.5" width="119" height="119" rx="25.5" fill="none"
+        stroke="#4a5162" stroke-width="1"/>
+
+  <!-- Waveform: symmetric about y=52, tallest in the middle. -->
+  <g fill="#5aa9e6">
+    <rect x="24" y="42" width="7" height="20" rx="3.5"/>
+    <rect x="37" y="32" width="7" height="40" rx="3.5"/>
+    <rect x="50" y="22" width="7" height="60" rx="3.5"/>
+    <rect x="63" y="34" width="7" height="36" rx="3.5"/>
+    <rect x="76" y="26" width="7" height="52" rx="3.5"/>
+    <rect x="89" y="38" width="7" height="28" rx="3.5"/>
+    <rect x="102" y="46" width="7" height="12" rx="3.5"/>
+  </g>
+
+  <!-- Subtitle lines: the generated LRC. -->
+  <g fill="#e8b04b">
+    <rect x="24" y="94" width="80" height="8" rx="4"/>
+    <rect x="24" y="108" width="52" height="8" rx="4" fill-opacity="0.55"/>
+  </g>
+</svg>

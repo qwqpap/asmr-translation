@@ -10,6 +10,21 @@
 MSI 只包含 Win32 GUI、项目 wheel、引导脚本、依赖清单和许可证，不包含约 2.4GB 的
 Python 环境、CUDA、FFmpeg、Ollama 或约 3.1GB Whisper 模型，因此安装包本身很小。
 
+## 两个前端
+
+MSI 安装并启动的是原生 Win32 GUI，这是 Windows 上的默认前端，不需要 Qt。跨平台的
+Qt GUI 不在 MSI 里，也不会被向导下载（Qt 约 100MB，对只用原生 GUI 的人是纯负担）。
+需要它的话在开发环境中装可选依赖：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[gui]"
+.\.venv\Scripts\asmr-translation.exe
+```
+
+两者读写同一份 `settings.json` 和同一套缓存，API Key 也都存在同一组 Credential
+Manager 条目里，可以随时换着用。Qt GUI 的常见启动问题见
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md)。
+
 ## 依赖向导
 
 向导不会在打开时联网。勾选项目并点击“安装所选”后才开始下载：

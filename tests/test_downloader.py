@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -76,7 +76,7 @@ def test_download_manifest_records_unselected_files(tmp_path: Path, monkeypatch)
 def test_worker_download_plan_returns_public_metadata(monkeypatch, capsys) -> None:
     plan = WorkPlan("1528633", "RJ01528633", "Title", "Circle", "", "https://example.test",
                     (remote("a", "mp3/a.mp3"),))
-    monkeypatch.setattr("asmr_lrc.gui_worker.fetch_work_plan", lambda _rj, _config: plan)
+    monkeypatch.setattr("asmr_lrc.session.fetch_work_plan", lambda _rj, _config: plan)
     assert dispatch({"protocol": 1, "command": "download_plan", "rj": "RJ01528633"}) == 0
     output = json.loads(capsys.readouterr().out)
     assert output["event"] == "download_metadata"
@@ -97,8 +97,8 @@ def test_worker_download_run_maps_structured_events(monkeypatch, tmp_path: Path,
         )
         return root
 
-    monkeypatch.setattr("asmr_lrc.gui_worker.fetch_work_plan", lambda _rj, _config: plan)
-    monkeypatch.setattr("asmr_lrc.gui_worker.download_plan", fake_download)
+    monkeypatch.setattr("asmr_lrc.session.fetch_work_plan", lambda _rj, _config: plan)
+    monkeypatch.setattr("asmr_lrc.session.download_plan", fake_download)
     dispatch({
         "protocol": 1,
         "command": "download_run",

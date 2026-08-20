@@ -1,8 +1,9 @@
 # ASMR 日语音频转中文 LRC：v0.1 历史 TODO
 
 > 本文保留 v0.1 命令行版本的原始范围。v0.2 已新增上下文双阶段翻译、外部
-> OpenAI-compatible 路由和原生 Win32 GUI；当前说明与验收以 README 和
-> `docs/VALIDATION.md` 为准。
+> OpenAI-compatible 路由和原生 Win32 GUI；v0.3 又加入 TranslateGemma 主翻译和
+> Windows/Linux 通用的 Qt 前端 `asmr_gui`。因此下文的“仅 Windows”和“不做 GUI”只是
+> 历史记录，当前说明与验收以 README 和 `docs/VALIDATION.md` 为准。
 
 ## 1. 项目目标
 

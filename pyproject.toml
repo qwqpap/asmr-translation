@@ -7,21 +7,32 @@ name = "asmr-lrc"
 version = "0.3.0"
 description = "Local Japanese ASMR transcription and Simplified Chinese LRC generation"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.14"
 license = { text = "AGPL-3.0-or-later" }
 license-files = ["COPYING"]
 classifiers = [
   "License :: OSI Approved :: GNU Affero General Public License v3",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
   "faster-whisper>=1.1.1,<2",
+  "numpy>=1.26,<3",
 ]
 
 [project.optional-dependencies]
 cuda = [
   "nvidia-cublas-cu12>=12.1,<13",
   "nvidia-cudnn-cu12>=9,<10",
+]
+# Qt is LGPL-3.0, which AGPL-3.0-or-later can link against; PySide6-Essentials
+# leaves out the add-ons this GUI never loads (WebEngine, Charts, 3D).
+gui = [
+  "PySide6-Essentials>=6.7,<7",
+  "sounddevice>=0.4.6,<1",
+  "keyring>=25,<26; sys_platform != 'win32'",
 ]
 dev = [
   "build>=1.2,<2",
@@ -32,8 +43,13 @@ dev = [
 [project.scripts]
 asmr-lrc = "asmr_lrc.cli:main"
 
+# A GUI script so Windows launches it through pythonw.exe and no console window
+# flashes up behind the main window.
+[project.gui-scripts]
+asmr-translation = "asmr_gui:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["asmr_lrc"]
+packages = ["asmr_lrc", "asmr_gui"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

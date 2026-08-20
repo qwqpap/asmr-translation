@@ -1,0 +1,9 @@
+# Shell scripts and desktop entries must reach Linux with LF endings even when
+# they are edited on a Windows checkout: a CR in the shebang makes the kernel
+# look for an interpreter literally named "bash\r".
+*.sh text eol=lf
+*.desktop text eol=lf
+# Markdown is authored on Windows but read on Linux and in diffs: pinning LF
+# keeps an editor that silently rewrites endings from turning a small doc edit
+# into a whole-file rewrite that destroys blame.
+*.md text eol=lf

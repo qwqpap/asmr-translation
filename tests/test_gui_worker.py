@@ -97,7 +97,7 @@ def test_worker_prepares_pcm_proxy_and_reuses_it(tmp_path: Path, monkeypatch, ca
         Path(command[-1]).write_bytes(b"wave")
         return SimpleNamespace(returncode=0, stderr="")
 
-    monkeypatch.setattr("asmr_lrc.gui_worker.subprocess.run", fake_run)
+    monkeypatch.setattr("asmr_lrc.session.subprocess.run", fake_run)
     request = {
         "protocol": 1,
         "command": "prepare_playback",
@@ -192,7 +192,7 @@ def test_worker_probe_external_only_does_not_require_ollama(
         )
         return {"checks": [], "ok": True}
 
-    monkeypatch.setattr("asmr_lrc.gui_worker.probe_environment", fake_probe)
+    monkeypatch.setattr("asmr_lrc.session.probe_environment", fake_probe)
     dispatch(
         {
             "protocol": 1,
@@ -226,11 +226,11 @@ def test_worker_probe_reports_exact_ollama_pull_command(
             raise RuntimeError("Ollama 模型未安装: translategemma:4b")
 
     monkeypatch.setattr(
-        "asmr_lrc.gui_worker.probe_environment",
+        "asmr_lrc.session.probe_environment",
         lambda *_args, **_kwargs: {"checks": [], "ok": True},
     )
     monkeypatch.setattr(
-        "asmr_lrc.gui_worker.create_provider", lambda _config: MissingProvider()
+        "asmr_lrc.session.create_provider", lambda _config: MissingProvider()
     )
 
     dispatch(

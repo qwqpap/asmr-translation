@@ -38,6 +38,71 @@
  profile 已保存为 TranslateGemma 主翻译、Qwen 分析/兜底，Qwen 旧方案仍保留为兼容/可选
  路径，不把未完成门槛宣称为全面替换。
 
+## 跨平台 Qt 前端（2026-08-20）
+
+原生 Win32 GUI 保留为 Windows 默认前端；新增的 `asmr_gui` 是 PySide6 前端，任务、
+播放器、下载、设置四页与原生版对应，同进程直接调用 `asmr_lrc`，不经过 JSONL worker。
+
+### 已在本机（Windows 11）验证
+
+- `ruff check .` 全通过；`pytest -q` 194 项全通过，其中新增 95 项：18 项跨平台目录解析、
+  20 项凭据存储、19 项播放引擎、13 项原生/Qt 设置一致性、15 项 Linux 打包资产和 10 项
+  文档相对链接检查。
+- Qt GUI 真实启动：四页全部构造成功，导航为“任务/播放器/下载/设置”，窗口 1180×780，
+  `platform: windows`、`style: fusion`、`exec returned 0`。`build_app_config` 把语境分析
+  角色解析到 Qwen，而不是落到只做翻译的 TranslateGemma。
+- `pip install .[gui]` 生成的 `asmr-translation.exe`（gui-script，走 pythonw 不闪控制台）
+  以 `QT_QPA_PLATFORM=offscreen` 启动后持续运行，入口点与窗口构造均正常。
+- conda 环境下 `import PySide6` 失败（`WinError 127`）的根因已定位：`Qt6Core.dll` 按无
+  版本号的 `icuuc.dll` 链接系统 ICU，而 Anaconda 的 `Library\bin` 里有一份带版本号符号
+  的 ICU 且排在 `System32` 之前。逐个扫描 `Qt6*.dll` 的导入表确认 `icuuc.dll` 是唯一可
+  被这样顶替的非系统依赖，因此修复限定为在包导入时预加载 `System32\icuuc.dll`
+  （`asmr_gui/qt_bootstrap.py`），没有改动全局 DLL 搜索策略，也不影响 CUDA 库发现。
+- `python -m build --wheel` 成功：wheel 同时包含 `asmr_lrc`（26 个模块）与 `asmr_gui`
+  （13 个模块），`gui_scripts` 里有 `asmr-translation = asmr_gui:main`，`COPYING` 作为
+  `License-File` 入包，`Requires-Python` 为 `>=3.12,<3.14`，`keyring` 带
+  `sys_platform != 'win32'` 标记（Windows 不会多装一份），分类器同时声明 Windows 与
+  POSIX::Linux。因此 Linux 侧 `pip install .[gui]` 的元数据路径是实测可用的。
+- 设置结构与 `native/src/settings.cpp` 的一致性由测试断言，而不是靠人工比对：22 个顶层
+  键、5 个提供方键、原生文档往返不变、BOM 容错、协议推断、API Key 只随 OpenAI 提供方
+  下发。文件位置也一并断言：Windows 侧两个前端都落在
+  `%LOCALAPPDATA%\ASMR Translation\settings.json`，默认下载库都是 `<下载>\ASMR Translation`，
+  改名会直接让测试失败而不是让用户拿到两份互不可见的配置。
+- 写文档时在凭据存储里发现并修掉两个真实缺陷，都是“看起来成功”的静默失败：
+  1. 清除 API Key 时，`CredDeleteW` 和 `keyring.delete_password` 的失败被无条件吞掉，
+     用户以为密钥已删除，实际仍留在凭据管理器/钥匙环里。现在只有“条目本就不存在”
+     （Windows 的 `ERROR_NOT_FOUND`，Linux 用删除后回读确认）才算成功，其余一律报错；
+     无法确认是否删除时按失败处理。
+  2. `backend_status()` 用类名里是否含 "fail" 判断 keyring 是否可用，而 keyring 的
+     `backends.fail.Keyring` 和 `backends.null.Keyring` 类名都叫 `Keyring`，检测永远不会
+     命中 —— 没有 Secret Service/KWallet 时反而会报告“后端可用”。改为按模块路径判断，
+     并把 `null`（静默丢弃写入）一起拒绝；设置页显示的后端名也改成带模块的全名，
+     因为几乎所有后端的类名都是 `Keyring`。
+  Windows 侧用测试专属条目名 `ASMRTranslation/Test/<uuid>` 对真实凭据管理器做了写入、
+  含日文的 UTF-16LE 回读、清除、重复删除的完整往返，不会碰到四个真实角色条目。
+- `asmr_lrc/platform_paths.py` 的 Linux 分支虽然没有实机，但已被单测钉住：XDG 三个变量
+  生效、缺失时回退到 `.config`/`.cache`/`.local/state`、相对路径值按规范忽略、
+  `user-dirs.dirs` 里本地化的 `XDG_DOWNLOAD_DIR="$HOME/下载"` 能被解析且不会把
+  `XDG_DESKTOP_DIR` 当成下载目录、缓存键的大小写折叠只在 Windows/macOS 打开。
+- Linux 打包资产由测试守住：desktop 条目必填键、`Exec=@LAUNCHER@` 占位符、
+  `StartupWMClass` 与 `setDesktopFileName()` 一致、LF 行尾、脚本不调用 sudo、除 pip 外
+  不下载任何东西、Python 版本闸门与 `requires-python` 一致、`install.sh` 以 100755 入库。
+  `bash -n` 语法检查通过。
+
+### 尚未验证（本会话没有 Linux 机器）
+
+以下都是纸面正确、未经实机确认，不能当成发布门槛通过：
+
+- 在任何发行版上真正跑过 `packaging/linux/install.sh`。README 里的包名来自各发行版文档，
+  不是实测安装结果。
+- Qt 在 X11/Wayland 下的实际启动、`libxcb-cursor0` 缺失时的报错文案、PortAudio 输出、
+  fcitx5/ibus 中文输入法在真实会话中的表现。
+- Linux 上的 CUDA：`dlopen` 顺序、`LD_LIBRARY_PATH` 是否被 ASR 子进程正确继承。
+- `keyring` 与 Secret Service / KWallet 的实际读写往返。
+- desktop 条目在真实菜单中的显示，以及图标在各主题尺寸下的渲染。
+- Qt GUI 的播放器实机验收（拖动、倍速、点击台词跳转、双击编辑），与下面“仍需人工验收”
+  的项目同级别。
+
 ## 已完成证据
 
 - Python 自动测试覆盖上下文窗口、动态 Schema、术语证据、双阶段路由、缓存失效、
@@ -60,10 +125,11 @@
 ## 实机环境
 
 - Windows 11，NVIDIA GeForce GTX 1660 Ti 6 GiB。
-- Python 3.12 项目 `.venv`。
+- Python 3.12.7 项目 `.venv`；PySide6 6.11.2、sounddevice 0.5.6、numpy 2.5.1。
 - `faster-whisper-large-v3`，CUDA，`int8_float16`。
 - Ollama `qwen3.5-9b-abliterated:latest`。
 - FFmpeg 可执行文件来自本机 PATH。
+- 没有 Linux 实机；跨平台部分的实机验收见上面的“尚未验证”。
 
 ## 仍需人工验收
 

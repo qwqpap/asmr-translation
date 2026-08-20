@@ -1,11 +1,17 @@
 # 构建 WiX MSI（维护者）
 
+MSI 只打包原生 Win32 GUI。跨平台 Qt GUI 不进安装包，也不进依赖 lock：Qt 约 100MB，
+对只用原生 GUI 的用户是纯负担，需要它的人按
+[packaging/linux/README.md](../packaging/linux/README.md) 或 README 的手工环境一节装
+`.[gui]`。Linux 侧没有二进制包，只有 `packaging/linux/install.sh`，因此不需要哈希清单
+和签名流程。
+
 ## 工具链
 
 - Windows 10/11 x64
 - Visual Studio 2022 x64 C++ 工具链
 - CMake 3.24+
-- Python 3.12 和项目开发依赖
+- Python 3.12 或 3.13 和项目开发依赖（MSI 引导的运行时仍固定为 3.12 Embeddable）
 - WiX Toolset v4，命令为 `wix`
 
 仓库当前不捆绑 WiX。可使用官方 .NET tool 安装到用户范围，再确认 `wix --version`。

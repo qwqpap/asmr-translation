@@ -15,3 +15,5 @@ dist/
 installer/.stage/
 coverage.xml
 .coverage
+# Editor state; .vscode/settings.json here only pins an absolute CMake path.
+.vscode/
